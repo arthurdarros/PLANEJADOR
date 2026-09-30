@@ -94,12 +94,26 @@ function comerBusca(){
 function comerFields(){
  return '<div class="row"><div><label for="cg">Categoria</label><input id="cg" list="cgl" placeholder="Pizza, Hambúrguer..."><datalist id="cgl">'+CATR.map(function(c){return '<option value="'+c+'">'}).join("")+'</datalist></div><div><label for="fp">Faixa de preço</label><select id="fp"><option value="">Não informada</option><option value="$">$ · econômico</option><option value="$$">$$ · moderado</option><option value="$$$">$$$ · caro</option><option value="$$$$">$$$$ · sofisticado</option></select></div><div><label for="av">Nota (0 a 5)</label><input id="av" type="number" min="0" max="5" step="0.1" inputmode="decimal"></div></div><label for="hr">Horário de funcionamento</label><input id="hr" placeholder="Ex.: Seg-Sex 11h-23h">';
 }
+function restLinks(x){var L=[["Maps",x.maps],["Site",x.site],["Instagram",x.insta]];return L.filter(function(a){return a[1]}).map(function(a){return '<a target="_blank" rel="noopener noreferrer" href="'+esc(a[1])+'">'+a[0]+'</a>'}).join(" · ")}
+var restTok=0;
 function usarRest(x){
- var set=function(i,v){var e=document.getElementById(i);if(e&&v)e.value=v};
+ var g=function(i){return document.getElementById(i)},tok=++restTok,er=g("e");
+ ["fp","av","hr","nt","lk"].forEach(function(i){if(g(i))g(i).value=""});
+ var set=function(i,v){if(g(i)&&v)g(i).value=v};
  set("nm",x.nome);set("cg",x.coz||x.tipo);set("hr",x.horario);set("lk",x.maps);
  set("nt",[x.end,x.tel&&"Tel: "+x.tel,x.site&&"Site: "+x.site,x.insta&&"Instagram: "+x.insta].filter(Boolean).join(" · "));
- document.getElementById("e").textContent="Preenchido pelo mapa. Faixa de preço e nota não vêm do mapa: confira no link e preencha.";
- document.getElementById("nm").scrollIntoView({behavior:"smooth",block:"center"});
+ var base="Preenchido pelo mapa. ",fim="Faixa de preço e nota não vêm do mapa: confira no link e preencha.";
+ g("nm").scrollIntoView({behavior:"smooth",block:"center"});
+ if(!x.site&&!x.insta){er.textContent=base+fim;return}
+ er.textContent=base+"Buscando faixa de preço e horário no site...";
+ jget("/api/restinfo?site="+q(x.site||"")+"&insta="+q(x.insta||"")).then(function(d){
+  if(tok!==restTok||!g("fp"))return;
+  var got=[];
+  if(d.faixa){g("fp").value=d.faixa;got.push("faixa de preço")}
+  if(d.horario){g("hr").value=d.horario;got.push("horário")}
+  if(d.avaliacao){g("av").value=d.avaliacao;got.push("nota")}
+  er.textContent=got.length?base+"Do site ("+d.fonte+"): "+got.join(", ")+". Confira antes de salvar.":base+"O site não informou preço nem horário. "+fim;
+ }).catch(function(){if(tok===restTok&&g("e"))g("e").textContent=base+fim});
 }
 function nomeField(){
  if(tab!=="carro")return '<label for="nm">Nome</label><input id="nm">';
@@ -117,7 +131,8 @@ var S={dest:"",ini:"",fim:"",items:[],cities:[]},tab="hosp",editing=false,view="
 function prep(t){if(!t.cities)t.cities=t.dest?[t.dest]:[];var ch={};(t.items||[]).forEach(function(x){if(x.cat==="comer"&&x.escolhida===undefined)x.escolhida=true;if(x.cat!=="hosp"&&x.cat!=="carro")return;var k=x.cat+"|"+(x.cidade||"");if(x.escolhida===undefined){x.escolhida=!ch[k];ch[k]=true}else if(x.escolhida)ch[k]=true});return t}
 var cur=0,pend=[];
 function curCity(){return S.cities[cur]||S.dest}
-var st={};function save(){if(!TID||!S.dest)return;var id=TID,body=JSON.stringify(S);clearTimeout(st[id]);st[id]=setTimeout(function(){fetch("/api/trips/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:body}).catch(function(){})},300)}
+var st={};function save(){if(!TID||!S.dest)return;var id=TID,body=JSON.stringify(S);clearTimeout(st[id]);st[id]=setTimeout(function(){fetch("/api/trips/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:body}).then(function(r){if(!r.ok)throw 0;saveWarn(false)}).catch(function(){saveWarn(true)})},300)}
+function saveWarn(on){var b=document.getElementById("sv");if(!b){b=document.createElement("div");b.id="sv";b.setAttribute("role","alert");b.style.cssText="position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));background:var(--del);color:#fff;border-radius:10px;padding:10px 14px;font-size:14px;z-index:9;display:none";b.textContent="Não foi possível salvar no servidor. Suas alterações podem se perder ao fechar a página.";document.body.appendChild(b)}b.style.display=on?"block":"none"}
 function cidadeItem(){var v=document.getElementById("cd").value.trim()||curCity();return S.cities.length===1&&v===S.cities[0]?"":v}
 function jget(u){return fetch(u).then(function(r){return r.json()})}
 function nrm(s){return String(s).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim()}
@@ -274,7 +289,7 @@ function render(){
   jget("/api/restaurants?city="+q(curCity())+"&r="+document.getElementById("rr").value+"&cat="+q(document.getElementById("rc").value)).then(function(r){
    if(!Array.isArray(r)){m.textContent=r.erro||"Não foi possível buscar agora.";return}
    m.textContent=r.length?r.length+" resultados. Toque em Usar para preencher o formulário.":"Nada encontrado. Tente outra categoria ou um raio maior.";
-   l.innerHTML=r.map(function(x,k){return '<div class="item"><div><div class="n">'+esc(x.nome)+'</div><div class="m">'+esc([x.tipo,x.coz,x.dist+" m",x.end].filter(Boolean).join(" · "))+'</div></div><button class="ghost" data-use="'+k+'">Usar</button></div>'}).join("");
+   l.innerHTML=r.map(function(x,k){return '<div class="item"><div><div class="n">'+esc(x.nome)+'</div><div class="m">'+esc([x.tipo,x.coz,x.dist+" m",x.end].filter(Boolean).join(" · "))+'</div><div class="m">'+restLinks(x)+'</div></div><button class="ghost" data-use="'+k+'">Usar</button></div>'}).join("");
    Array.prototype.forEach.call(l.querySelectorAll("[data-use]"),function(b){b.onclick=function(){usarRest(r[+b.dataset.use])}});
   }).catch(function(){m.textContent="Falha ao buscar. Tente de novo."});
  };
