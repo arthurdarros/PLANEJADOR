@@ -18,9 +18,23 @@ const saveTrip = t => { fs.writeFileSync(DB + ".tmp", JSON.stringify(t)); fs.ren
 // ---------- Segurança: bloqueia URLs para rede interna (SSRF) ----------
 async function safeUrl(u) {
   const url = new URL(u);
-  if (!/^https?:$/.test(url.protocol)) throw new Error("URL inválida");
-  const { address } = await dns.lookup(url.hostname);
-  if (net.isIP(address) === 4 && /^(10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(address) || /^(::1|fc|fd|fe80)/i.test(address)) throw new Error("Endereço não permitido");
+
+  if (!/^https?:$/.test(url.protocol)) {
+    throw new Error("URL inválida");
+  }
+
+  const addresses = await dns.lookup(url.hostname, { all: true });
+
+  for (const { address } of addresses) {
+    if (
+      (net.isIP(address) === 4 &&
+        /^(10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(address)) ||
+      /^(::1|fc|fd|fe80)/i.test(address)
+    ) {
+      throw new Error("Endereço não permitido");
+    }
+  }
+
   return url.href;
 }
 
@@ -50,9 +64,41 @@ function parseHtml(html, href) {
   return { nome: nome.trim(), preco, nota, cidade, ci: dt("check_in"), co: dt("check_out"), hin, fotoUrl: meta(html, "og:image") || meta(html, "twitter:image") };
 }
 async function preview(raw) {
-  const href = await safeUrl(raw), r = await get(href), html = (await r.text()).slice(0, 2e6);
-  const d = parseHtml(html, raw), fu = d.fotoUrl; delete d.fotoUrl;
-  d.foto = ""; if (fu) { try { d.foto = await baixarFoto(new URL(fu, href).href); } catch {} }
+  if (!raw) {
+    throw new Error("URL não informada");
+  }
+
+  const href = await safeUrl(raw);
+
+  const r = await get(href);
+
+  if (!r.ok) {
+    throw new Error("Não foi possível acessar o link");
+  }
+
+  const contentType = r.headers.get("content-type") || "";
+
+  if (!contentType.includes("text/html")) {
+    throw new Error("O link não é uma página HTML");
+  }
+
+  const html = (await r.text()).slice(0, 2e6);
+
+  const d = parseHtml(html, href);
+
+  const fu = d.fotoUrl;
+  delete d.fotoUrl;
+
+  d.foto = "";
+
+  if (fu) {
+    try {
+      d.foto = await baixarFoto(new URL(fu, href).href);
+    } catch (e) {
+      console.error("Erro ao baixar imagem:", e.message);
+    }
+  }
+
   return d;
 }
 async function baixarFoto(u) {
@@ -98,7 +144,25 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith("/uploads/")) { const f = path.join(UP, path.basename(p)); return fs.existsSync(f) ? send(res, 200, fs.readFileSync(f), { jpg: "image/jpeg", png: "image/png", webp: "image/webp" }[f.split(".").pop()] || "application/octet-stream", { "Cache-Control": "public, max-age=31536000" }) : send(res, 404, { erro: "não encontrado" }); }
     if (p === "/api/trip" && req.method === "GET") return send(res, 200, loadTrip() || {});
     if (p === "/api/trip" && req.method === "PUT") { const t = JSON.parse(await readBody(req)); if (typeof t !== "object" || !Array.isArray(t.items)) return send(res, 400, { erro: "formato inválido" }); saveTrip(t); return send(res, 200, { ok: true }); }
-    if (p === "/api/preview") return send(res, 200, await preview(u.searchParams.get("url") || ""));
+    if (p === "/api/preview") {
+  const url = u.searchParams.get("url") || "";
+
+  if (!url) {
+    return send(res, 400, {
+      erro: "URL não informada"
+    });
+  }
+
+  try {
+    const dados = await preview(url);
+
+    return send(res, 200, dados);
+  } catch (e) {
+    return send(res, 400, {
+      erro: e.message || "Não foi possível processar o link"
+    });
+  }
+}
     if (p === "/api/foto") { const f = new URL(u.searchParams.get("url") || ""); if (f.hostname !== "storage.googleapis.com" || !f.pathname.startsWith("/movida-public-images/")) return send(res, 400, { erro: "origem não permitida" }); return send(res, 200, { foto: await baixarFoto(f.href) }); }
     if (p === "/api/places") { const q = (u.searchParams.get("q") || "").trim(); return send(res, 200, q.length < 3 ? [] : await places(q)); }
     if (p === "/api/weather") { const c = (u.searchParams.get("cities") || "").split("|").filter(Boolean), out = {}; for (const x of c) out[x] = await clima(x, u.searchParams.get("ini"), u.searchParams.get("fim")).catch(() => []); return send(res, 200, out); }

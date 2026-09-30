@@ -283,7 +283,17 @@ function render(){
   }
   er.textContent=(ok.length?"Preenchido: "+ok.join(", ")+". Confira antes de salvar.":"Não encontrei dados nesse link.")+av;
  }
- if(lk)lk.oninput=function(){fill(false);clearTimeout(lt);var m=lk.value.match(/https?:\/\/[^\s)]+/);if(!m)return;lt=setTimeout(function(){var er=document.getElementById("e");if(er)er.textContent="Buscando dados do link...";jget("/api/preview?url="+q(m[0])).then(aplicar).catch(function(){var er=document.getElementById("e");if(er)er.textContent=""})},600)};
+ if(lk)lk.oninput=function(){fill(false);clearTimeout(lt);var m=lk.value.match(/https?:\/\/[^\s)]+/);if(!m)return;lt=setTimeout(function(){var er=document.getElementById("e");if(er)er.textContent="Buscando dados do link...";jget("/api/preview?url="+q(m[0]))
+  .then(aplicar)
+  .catch(function(err){
+    var er = document.getElementById("e");
+
+    if (er) {
+      er.textContent = "Não foi possível ler esse link. Verifique se a URL está correta.";
+    }
+
+    console.error("Erro no preview:", err);
+  })},600)};
 }
 jget("/api/trip").then(function(t){if(t&&t.items){S=t;if(!S.cities)S.cities=S.dest?[S.dest]:[]}else if(S.items&&S.items.length){save()}render()}).catch(function(){render()});
 </script>
