@@ -15,6 +15,16 @@ const get = async (u, opt = {}) => fetch(u, { ...opt, headers: { "User-Agent": U
 const loadTrip = () => { try { return JSON.parse(fs.readFileSync(DB, "utf8")); } catch { return null; } };
 const saveTrip = t => { fs.writeFileSync(DB + ".tmp", JSON.stringify(t)); fs.renameSync(DB + ".tmp", DB); };
 
+// ---------- Várias viagens: data/trips.json = { "<id>": viagem } (migra data/trip.json antigo) ----------
+const DBS = path.join(DATA, "trips.json");
+const saveAll = o => { fs.writeFileSync(DBS + ".tmp", JSON.stringify(o)); fs.renameSync(DBS + ".tmp", DBS); };
+const trips = () => {
+  let all; try { all = JSON.parse(fs.readFileSync(DBS, "utf8")); } catch { all = null; }
+  if (!all) { all = {}; const old = loadTrip(); if (old && old.dest) { all[String(Date.now())] = old; saveAll(all); } }
+  return all;
+};
+const totalOf = t => (t.items || []).filter(x => !["hosp", "carro"].includes(x.cat) || x.escolhida).reduce((s, x) => s + (Number(x.preco) || 0), 0);
+
 // ---------- Segurança: bloqueia URLs para rede interna (SSRF) ----------
 async function safeUrl(u) {
   const url = new URL(u);
@@ -142,8 +152,14 @@ const server = http.createServer(async (req, res) => {
     if (TOKEN && p.startsWith("/api/") && req.headers["x-token"] !== TOKEN && u.searchParams.get("token") !== TOKEN) return send(res, 401, { erro: "não autorizado" });
     if (p === "/" || p === "/index.html") return send(res, 200, fs.readFileSync(path.join(__dirname, "public", "index.html")), "text/html; charset=utf-8");
     if (p.startsWith("/uploads/")) { const f = path.join(UP, path.basename(p)); return fs.existsSync(f) ? send(res, 200, fs.readFileSync(f), { jpg: "image/jpeg", png: "image/png", webp: "image/webp" }[f.split(".").pop()] || "application/octet-stream", { "Cache-Control": "public, max-age=31536000" }) : send(res, 404, { erro: "não encontrado" }); }
-    if (p === "/api/trip" && req.method === "GET") return send(res, 200, loadTrip() || {});
-    if (p === "/api/trip" && req.method === "PUT") { const t = JSON.parse(await readBody(req)); if (typeof t !== "object" || !Array.isArray(t.items)) return send(res, 400, { erro: "formato inválido" }); saveTrip(t); return send(res, 200, { ok: true }); }
+    if (p === "/api/trips" && req.method === "GET") return send(res, 200, Object.entries(trips()).map(([id, t]) => ({ id, dest: t.dest, cities: t.cities || [t.dest], ini: t.ini, fim: t.fim, total: totalOf(t), count: (t.items || []).length })));
+    const mt = p.match(/^\/api\/trips\/([\w-]{1,40})$/);
+    if (mt) {
+      const all = trips(), id = mt[1];
+      if (req.method === "GET") return all[id] ? send(res, 200, all[id]) : send(res, 404, { erro: "viagem não encontrada" });
+      if (req.method === "PUT") { const t = JSON.parse(await readBody(req)); if (typeof t !== "object" || !Array.isArray(t.items)) return send(res, 400, { erro: "formato inválido" }); all[id] = t; saveAll(all); return send(res, 200, { ok: true }); }
+      if (req.method === "DELETE") { delete all[id]; saveAll(all); return send(res, 200, { ok: true }); }
+    }
     if (p === "/api/preview") {
   const url = u.searchParams.get("url") || "";
 
@@ -166,8 +182,8 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/foto") { const f = new URL(u.searchParams.get("url") || ""); if (f.hostname !== "storage.googleapis.com" || !f.pathname.startsWith("/movida-public-images/")) return send(res, 400, { erro: "origem não permitida" }); return send(res, 200, { foto: await baixarFoto(f.href) }); }
     if (p === "/api/places") { const q = (u.searchParams.get("q") || "").trim(); return send(res, 200, q.length < 3 ? [] : await places(q)); }
     if (p === "/api/weather") { const c = (u.searchParams.get("cities") || "").split("|").filter(Boolean), out = {}; for (const x of c) out[x] = await clima(x, u.searchParams.get("ini"), u.searchParams.get("fim")).catch(() => []); return send(res, 200, out); }
-    if (p === "/api/calendar.ics") return send(res, 200, ics(loadTrip() || {}), "text/calendar; charset=utf-8", { "Content-Disposition": 'attachment; filename="viagem.ics"' });
-    if (p === "/api/backup") return send(res, 200, fs.existsSync(DB) ? fs.readFileSync(DB) : "{}", "application/json", { "Content-Disposition": 'attachment; filename="viagem-backup.json"' });
+    if (p === "/api/calendar.ics") return send(res, 200, ics(trips()[u.searchParams.get("id")] || {}), "text/calendar; charset=utf-8", { "Content-Disposition": 'attachment; filename="viagem.ics"' });
+    if (p === "/api/backup") return send(res, 200, (trips(), fs.existsSync(DBS) ? fs.readFileSync(DBS) : "{}"), "application/json", { "Content-Disposition": 'attachment; filename="viagens-backup.json"' });
     send(res, 404, { erro: "rota não encontrada" });
   } catch (e) { send(res, 500, { erro: e.message }); }
 });
