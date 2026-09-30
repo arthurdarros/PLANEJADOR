@@ -2,7 +2,7 @@
 // Uso: node server.js   ->  http://localhost:3000
 const http = require("http"), fs = require("fs"), path = require("path"), dns = require("dns").promises, net = require("net"), crypto = require("crypto");
 const PORT = process.env.PORT || 3000, TOKEN = process.env.APP_TOKEN || "";
-const DATA = path.join(__dirname, "data"), UP = path.join(DATA, "uploads"), DB = path.join(DATA, "trip.json");
+const DATA = path.join(__dirname, "data"), UP = path.join(DATA, "uploads"), DB = path.join(DATA, "trips.json"), OLD = path.join(DATA, "trip.json");
 fs.mkdirSync(UP, { recursive: true });
 const UA = "PlanejadorViagem/1.0 (uso pessoal)";
 const cache = new Map(); // cache simples em memória
@@ -12,18 +12,14 @@ const readBody = req => new Promise((ok, no) => { let b = ""; req.on("data", c =
 const get = async (u, opt = {}) => fetch(u, { ...opt, headers: { "User-Agent": UA, "Accept-Language": "pt-BR,pt;q=0.9", ...(opt.headers || {}) }, signal: AbortSignal.timeout(8000), redirect: "follow" });
 
 // ---------- Persistência (arquivo JSON, gravação atômica) ----------
-const loadTrip = () => { try { return JSON.parse(fs.readFileSync(DB, "utf8")); } catch { return null; } };
-const saveTrip = t => { fs.writeFileSync(DB + ".tmp", JSON.stringify(t)); fs.renameSync(DB + ".tmp", DB); };
-
-// ---------- Várias viagens: data/trips.json = { "<id>": viagem } (migra data/trip.json antigo) ----------
-const DBS = path.join(DATA, "trips.json");
-const saveAll = o => { fs.writeFileSync(DBS + ".tmp", JSON.stringify(o)); fs.renameSync(DBS + ".tmp", DBS); };
-const trips = () => {
-  let all; try { all = JSON.parse(fs.readFileSync(DBS, "utf8")); } catch { all = null; }
-  if (!all) { all = {}; const old = loadTrip(); if (old && old.dest) { all[String(Date.now())] = old; saveAll(all); } }
-  return all;
-};
-const totalOf = t => (t.items || []).filter(x => !["hosp", "carro"].includes(x.cat) || x.escolhida).reduce((s, x) => s + (Number(x.preco) || 0), 0);
+// Formato: { "<id>": { dest, ini, fim, cities, items: [...] }, ... }  (igual ao trips.json)
+const loadAll = () => { try { return JSON.parse(fs.readFileSync(DB, "utf8")); } catch { return {}; } };
+const saveAll = o => { fs.writeFileSync(DB + ".tmp", JSON.stringify(o)); fs.renameSync(DB + ".tmp", DB); };
+const okId = id => /^\d{1,20}$/.test(id || ""); // ids numéricos (Date.now()); evita chaves como __proto__
+const counted = t => (t.items || []).filter(x => !["hosp", "carro", "comer"].includes(x.cat) || x.escolhida);
+const resumo = ([id, t]) => ({ id, dest: t.dest || "", ini: t.ini || "", fim: t.fim || "", cities: t.cities || (t.dest ? [t.dest] : []), count: (t.items || []).length, total: counted(t).reduce((s, x) => s + (Number(x.preco) || 0), 0) });
+// Migração: trip.json (viagem única antiga) vira uma entrada em trips.json
+if (!fs.existsSync(DB) && fs.existsSync(OLD)) { try { const t = JSON.parse(fs.readFileSync(OLD, "utf8")); if (t && t.dest) saveAll({ [Date.now()]: t }); } catch {} }
 
 // ---------- Segurança: bloqueia URLs para rede interna (SSRF) ----------
 async function safeUrl(u) {
@@ -39,7 +35,7 @@ async function safeUrl(u) {
     if (
       (net.isIP(address) === 4 &&
         /^(10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(address)) ||
-      /^(::1|fc|fd|fe80)/i.test(address)
+      (net.isIP(address) === 6 && /^(::1|fc|fd|fe80)/i.test(address))
     ) {
       throw new Error("Endereço não permitido");
     }
@@ -137,11 +133,45 @@ async function clima(cidade, ini, fim) {
   cache.set(k, out); return out; // só há previsão para ~16 dias à frente
 }
 
+
+// ---------- Restaurantes (OpenStreetMap / Overpass, gratuito, sem chave) ----------
+const COZ = { brazilian: "Brasileira", regional: "Regional", italian: "Italiana", pizza: "Pizza", burger: "Hambúrguer", steak_house: "Carnes", barbecue: "Churrasco", japanese: "Japonesa", sushi: "Sushi", german: "Alemã", fondue: "Fondue", chinese: "Chinesa", french: "Francesa", mexican: "Mexicana", seafood: "Frutos do mar", fish: "Peixes", coffee_shop: "Café", vegetarian: "Vegetariana", vegan: "Vegana", international: "Internacional", portuguese: "Portuguesa", spanish: "Espanhola", arab: "Árabe", lebanese: "Libanesa", sandwich: "Sanduíches", ice_cream: "Sorvetes", chocolate: "Chocolate", bakery: "Padaria", pasta: "Massas", thai: "Tailandesa", indian: "Indiana", peruvian: "Peruana", argentinian: "Argentina" };
+const TIPO = { restaurant: ["restaurant", "Restaurante"], cafe: ["cafe", "Café"], bar: ["bar", "Bar"], pub: ["bar", "Pub"] };
+const hav = (a, b, c, d) => { const r = x => x * Math.PI / 180, h = Math.sin(r(c - a) / 2) ** 2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(r(d - b) / 2) ** 2; return 12742000 * Math.asin(Math.sqrt(h)); };
+const CATKEYS = { "Pizza":"pizza","Hambúrguer":"burger","Carnes e churrasco":"steak_house|barbecue","Italiana":"italian|pasta","Massas":"pasta","Japonesa":"japanese|sushi","Fondue":"fondue","Alemã":"german","Frutos do mar":"seafood|fish","Vegetariana":"vegetarian|vegan","Brasileira":"brazilian|regional" };
+async function restaurantes(cidade, raio, cat) {
+  raio = Math.min(Math.max(+raio || 4000, 1000), 15000);
+  const k = `r:${cidade}:${raio}:${cat || ""}`; if (cache.has(k)) return cache.get(k);
+  const c = (await places(cidade))[0]; if (!c) return [];
+  let filtro = '["amenity"~"^(restaurant|cafe|bar|pub)$"]';
+  if (cat === "Café") filtro = '["amenity"="cafe"]';
+  else if (cat === "Bar") filtro = '["amenity"~"^(bar|pub)$"]';
+  else if (CATKEYS[cat]) filtro += `["cuisine"~"${CATKEYS[cat]}"]`;
+  const qy = `[out:json][timeout:25];nwr${filtro}["name"](around:${raio},${c.lat},${c.lon});out center 400;`;
+  const r = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded" }, body: "data=" + encodeURIComponent(qy), signal: AbortSignal.timeout(30000) });
+  if (!r.ok) throw new Error("O serviço de mapas está ocupado. Tente de novo em instantes.");
+  const j = await r.json();
+  const out = (j.elements || []).map(e => {
+    const g = e.tags || {}, lat = e.lat ?? e.center?.lat, lon = e.lon ?? e.center?.lon; if (lat == null || !g.name) return null;
+    const [t, tipo] = TIPO[g.amenity] || ["restaurant", "Restaurante"];
+    const coz = (g.cuisine || "").split(";").map(x => COZ[x.trim()] || "").filter(Boolean).slice(0, 2).join(", ");
+    const end = [g["addr:street"] && (g["addr:street"] + (g["addr:housenumber"] ? ", " + g["addr:housenumber"] : "")), g["addr:suburb"]].filter(Boolean).join(" · ");
+    let site = g.website || g["contact:website"] || ""; if (site && !/^https?:\/\//i.test(site)) site = "https://" + site;
+    const score = (coz ? 2 : 0) + (site ? 2 : 0) + (g.opening_hours ? 1 : 0) + (g.phone || g["contact:phone"] ? 1 : 0) + (t === "restaurant" ? 1 : 0);
+    const ig = g["contact:instagram"] || g.instagram || "";
+    const insta = ig ? (/^https?:/.test(ig) ? ig : "https://instagram.com/" + ig.replace(/^@/, "")) : "";
+    const maps = "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent([g.name, g["addr:street"], cidade].filter(Boolean).join(" "));
+    return { nome: g.name, t, tipo, coz, end, site, insta, maps, horario: g.opening_hours || "", tel: g.phone || g["contact:phone"] || "", dist: Math.round(hav(c.lat, c.lon, lat, lon)), score };
+  }).filter(Boolean);
+  const uniq = [...new Map(out.map(o => [o.nome.toLowerCase() + o.end, o])).values()].sort((a, b) => b.score - a.score || a.dist - b.dist).slice(0, 60).map(({ score, ...o }) => o);
+  cache.set(k, uniq); return uniq;
+}
+
 // ---------- Exportar para calendário (.ics) ----------
 function ics(t) {
   const d = s => s.replace(/-/g, ""), add = (s, n) => { const x = new Date(s + "T12:00:00"); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
   const esc = s => String(s || "").replace(/[\\;,]/g, m => "\\" + m).replace(/\n/g, "\\n");
-  const ev = (t.items || []).filter(x => x.dia && (!["hosp", "carro"].includes(x.cat) || x.escolhida)).map(x => ["BEGIN:VEVENT", "UID:" + x.id + "@planejador", "DTSTAMP:" + new Date().toISOString().replace(/[-:]|\.\d+/g, ""), "DTSTART;VALUE=DATE:" + d(x.dia), "DTEND;VALUE=DATE:" + d(x.fim || add(x.dia, 1)), "SUMMARY:" + esc(x.nome), "DESCRIPTION:" + esc([x.preco ? "R$ " + x.preco : "", x.ret ? "Retirada: " + x.ret : "", x.dev && x.dev !== x.ret ? "Devolução: " + x.dev : "", x.nota, x.link].filter(Boolean).join("\n")), "END:VEVENT"].join("\r\n"));
+  const ev = (t.items || []).filter(x => x.dia && (!["hosp", "carro", "comer"].includes(x.cat) || x.escolhida)).map(x => ["BEGIN:VEVENT", "UID:" + x.id + "@planejador", "DTSTAMP:" + new Date().toISOString().replace(/[-:]|\.\d+/g, ""), "DTSTART;VALUE=DATE:" + d(x.dia), "DTEND;VALUE=DATE:" + d(x.fim || add(x.dia, 1)), "SUMMARY:" + esc(x.nome), "DESCRIPTION:" + esc([x.preco ? "R$ " + x.preco : "", x.ret ? "Retirada: " + x.ret : "", x.dev && x.dev !== x.ret ? "Devolução: " + x.dev : "", x.nota, x.link].filter(Boolean).join("\n")), "END:VEVENT"].join("\r\n"));
   return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Planejador//PT", "X-WR-CALNAME:" + esc(t.dest || "Viagem"), ...ev, "END:VCALENDAR"].join("\r\n");
 }
 
@@ -152,13 +182,15 @@ const server = http.createServer(async (req, res) => {
     if (TOKEN && p.startsWith("/api/") && req.headers["x-token"] !== TOKEN && u.searchParams.get("token") !== TOKEN) return send(res, 401, { erro: "não autorizado" });
     if (p === "/" || p === "/index.html") return send(res, 200, fs.readFileSync(path.join(__dirname, "public", "index.html")), "text/html; charset=utf-8");
     if (p.startsWith("/uploads/")) { const f = path.join(UP, path.basename(p)); return fs.existsSync(f) ? send(res, 200, fs.readFileSync(f), { jpg: "image/jpeg", png: "image/png", webp: "image/webp" }[f.split(".").pop()] || "application/octet-stream", { "Cache-Control": "public, max-age=31536000" }) : send(res, 404, { erro: "não encontrado" }); }
-    if (p === "/api/trips" && req.method === "GET") return send(res, 200, Object.entries(trips()).map(([id, t]) => ({ id, dest: t.dest, cities: t.cities || [t.dest], ini: t.ini, fim: t.fim, total: totalOf(t), count: (t.items || []).length })));
-    const mt = p.match(/^\/api\/trips\/([\w-]{1,40})$/);
+    if (p === "/api/trips" && req.method === "GET") return send(res, 200, Object.entries(loadAll()).map(resumo));
+    const mt = p.match(/^\/api\/trips\/([^/]+)$/);
     if (mt) {
-      const all = trips(), id = mt[1];
+      const id = decodeURIComponent(mt[1]); if (!okId(id)) return send(res, 400, { erro: "id inválido" });
+      const all = loadAll();
       if (req.method === "GET") return all[id] ? send(res, 200, all[id]) : send(res, 404, { erro: "viagem não encontrada" });
-      if (req.method === "PUT") { const t = JSON.parse(await readBody(req)); if (typeof t !== "object" || !Array.isArray(t.items)) return send(res, 400, { erro: "formato inválido" }); all[id] = t; saveAll(all); return send(res, 200, { ok: true }); }
+      if (req.method === "PUT") { const t = JSON.parse(await readBody(req)); if (!t || typeof t !== "object" || !Array.isArray(t.items)) return send(res, 400, { erro: "formato inválido" }); all[id] = t; saveAll(all); return send(res, 200, { ok: true }); }
       if (req.method === "DELETE") { delete all[id]; saveAll(all); return send(res, 200, { ok: true }); }
+      return send(res, 405, { erro: "método não permitido" });
     }
     if (p === "/api/preview") {
   const url = u.searchParams.get("url") || "";
@@ -180,10 +212,11 @@ const server = http.createServer(async (req, res) => {
   }
 }
     if (p === "/api/foto") { const f = new URL(u.searchParams.get("url") || ""); if (f.hostname !== "storage.googleapis.com" || !f.pathname.startsWith("/movida-public-images/")) return send(res, 400, { erro: "origem não permitida" }); return send(res, 200, { foto: await baixarFoto(f.href) }); }
+    if (p === "/api/restaurants") { const c = (u.searchParams.get("city") || "").trim(); if (c.length < 3) return send(res, 400, { erro: "Cidade não informada" }); try { return send(res, 200, await restaurantes(c, u.searchParams.get("r"), u.searchParams.get("cat"))); } catch (e) { return send(res, 502, { erro: e.message || "Não foi possível buscar restaurantes agora." }); } }
     if (p === "/api/places") { const q = (u.searchParams.get("q") || "").trim(); return send(res, 200, q.length < 3 ? [] : await places(q)); }
     if (p === "/api/weather") { const c = (u.searchParams.get("cities") || "").split("|").filter(Boolean), out = {}; for (const x of c) out[x] = await clima(x, u.searchParams.get("ini"), u.searchParams.get("fim")).catch(() => []); return send(res, 200, out); }
-    if (p === "/api/calendar.ics") return send(res, 200, ics(trips()[u.searchParams.get("id")] || {}), "text/calendar; charset=utf-8", { "Content-Disposition": 'attachment; filename="viagem.ics"' });
-    if (p === "/api/backup") return send(res, 200, (trips(), fs.existsSync(DBS) ? fs.readFileSync(DBS) : "{}"), "application/json", { "Content-Disposition": 'attachment; filename="viagens-backup.json"' });
+    if (p === "/api/calendar.ics") { const all = loadAll(), id = u.searchParams.get("id"); if (!okId(id) || !all[id]) return send(res, 404, { erro: "viagem não encontrada" }); return send(res, 200, ics(all[id]), "text/calendar; charset=utf-8", { "Content-Disposition": 'attachment; filename="viagem.ics"' }); }
+    if (p === "/api/backup") return send(res, 200, fs.existsSync(DB) ? fs.readFileSync(DB) : "{}", "application/json", { "Content-Disposition": 'attachment; filename="viagem-backup.json"' });
     send(res, 404, { erro: "rota não encontrada" });
   } catch (e) { send(res, 500, { erro: e.message }); }
 });
