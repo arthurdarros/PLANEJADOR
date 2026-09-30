@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Planejador de viagem</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=Figtree:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f2f6f7;--card:#fff;--ink:#12303b;--mute:#5d7580;--line:#d5e0e4;--acc:#0e7c86;--accink:#fff;--price:#b86e00;--del:#b3261e;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1c21;--card:#172a31;--ink:#e6f0f2;--mute:#93a9b1;--line:#2a4149;--acc:#3cc0cb;--accink:#06262a;--price:#f0b45a;--del:#ff8a80}}
+:root[data-theme="dark"]{--bg:#0f1c21;--card:#172a31;--ink:#e6f0f2;--mute:#93a9b1;--line:#2a4149;--acc:#3cc0cb;--accink:#06262a;--price:#f0b45a;--del:#ff8a80}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Figtree,system-ui,sans-serif}
+h1,h2,h3{font-family:"Bricolage Grotesque",Figtree,sans-serif;margin:0;line-height:1.1}
+main{max-width:720px;margin:0 auto;padding:20px 16px 48px}
+label{display:block;font-size:14px;color:var(--mute);margin:12px 0 4px}
+input,select,textarea{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+input:focus,select:focus,button:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button,.btn{font:inherit;font-weight:600;border:0;border-radius:8px;padding:10px 16px;cursor:pointer;background:var(--acc);color:var(--accink);text-decoration:none;display:inline-block}
+.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1 1 140px}
+.setup{margin-top:8vh}
+.setup h1{font-size:clamp(34px,9vw,52px);font-weight:800;margin-bottom:8px}
+.setup p{color:var(--mute);margin:0 0 12px}
+.err{color:var(--del);min-height:22px;margin:8px 0 0;font-size:14px}
+.ticket{background:var(--acc);color:var(--accink);border-radius:14px;padding:18px 20px;display:flex;justify-content:space-between;gap:12px;align-items:flex-end;flex-wrap:wrap}
+.ticket h1{font-size:clamp(28px,7vw,40px);font-weight:800}
+.ticket small{display:block;opacity:.85}
+.ticket .tot{text-align:right;margin-left:auto}.ticket .tot b{font:800 28px "Bricolage Grotesque",sans-serif}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin:16px 0}
+.tabs button{background:transparent;color:var(--ink);border:1px solid var(--line);white-space:nowrap;padding:8px 14px}
+.tabs button[aria-selected="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.searches{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.searches .btn{padding:8px 12px;font-size:14px}
+.item{border-top:1px solid var(--line);padding:12px 0;display:flex;justify-content:space-between;gap:10px}
+.item:first-child{border-top:0}
+.item .n{font-weight:600}.item .m{color:var(--mute);font-size:14px}
+.item .p{color:var(--price);font-weight:600;white-space:nowrap}
+.item a{color:var(--acc)}
+.x{background:transparent;color:var(--del);padding:2px 8px;font-size:14px}
+.empty{color:var(--mute);margin:12px 0 0}
+.sum{width:100%;border-collapse:collapse;margin-bottom:16px}.sum td{padding:8px 0;border-top:1px solid var(--line)}.sum td:last-child{text-align:right;color:var(--price);font-weight:600}
+.l{display:flex;gap:10px;min-width:0}
+.th{width:72px;height:72px;object-fit:cover;border-radius:8px;flex:none}
+.ok{background:var(--acc);color:var(--accink);border-radius:10px;padding:1px 8px;font-size:12px;font-weight:600;vertical-align:middle}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+.chip{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:4px 6px 4px 12px;display:inline-flex;align-items:center;gap:4px}
+.day{margin-top:14px}.day h3{font-size:18px;margin-bottom:2px}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script>
+var CATS=[
+ {id:"hosp",nome:"Hospedagem",add:"Adicionar opção de hospedagem",vazio:"Nenhuma opção salva. Busque no Airbnb, salve várias opções aqui e depois escolha uma."},
+ {id:"trans",nome:"Transporte",add:"Adicionar passagem",vazio:"Nenhuma passagem salva. Busque ônibus ou voos e salve a opção escolhida."},
+ {id:"carro",nome:"Carro",add:"Adicionar aluguel",vazio:"Nenhum aluguel salvo. Compare locadoras e salve a melhor."},
+ {id:"comer",nome:"Restaurantes",add:"Adicionar restaurante",vazio:"Nenhum restaurante salvo. Explore no mapa e salve os que quiser visitar."},
+ {id:"ver",nome:"Atrações",add:"Adicionar atração",vazio:"Nenhuma atração salva. Explore no mapa e salve as que quiser visitar."}
+];
+var DESTS=["Gramado, RS","Canela, RS","Bento Gonçalves, RS","Torres, RS","Porto Alegre, RS","Florianópolis, SC","Balneário Camboriú, SC","Bombinhas, SC","Garopaba, SC","Curitiba, PR","Foz do Iguaçu, PR","Paraty, RJ","Rio de Janeiro, RJ","Búzios, RJ","Angra dos Reis, RJ","São Paulo, SP","Campos do Jordão, SP","Ubatuba, SP","Belo Horizonte, MG","Ouro Preto, MG","Brasília, DF","Bonito, MS","Pantanal, MT","Salvador, BA","Porto Seguro, BA","Trancoso, BA","Chapada Diamantina, BA","Maceió, AL","Maragogi, AL","Recife, PE","Porto de Galinhas, PE","Fernando de Noronha, PE","Natal, RN","Jericoacoara, CE","Fortaleza, CE","Lençóis Maranhenses, MA","Belém, PA","Manaus, AM","Gramado e Canela, RS","Montevidéu, Uruguai","Punta del Este, Uruguai","Colônia do Sacramento, Uruguai","Buenos Aires, Argentina","Bariloche, Argentina","Mendoza, Argentina","Ushuaia, Argentina","Santiago, Chile","San Pedro de Atacama, Chile","Cusco, Peru","Lima, Peru","Bogotá, Colômbia","Cartagena, Colômbia","Lisboa, Portugal","Porto, Portugal","Madri, Espanha","Barcelona, Espanha","Paris, França","Roma, Itália","Londres, Reino Unido","Amsterdã, Holanda","Nova York, EUA","Miami, EUA","Orlando, EUA","Cancún, México","Tóquio, Japão"];
+var MOV=[
+ ["Econômico",[["AX","Compacto com ar condicionado","Fiat Mobi, Renault Kwid"],["B","Econômico com ar condicionado","Fiat Argo ou similar"],["BS","Econômico sedan com ar condicionado","Hyundai HB20S, Fiat Cronos ou similar"],["BX","Econômico especial com ar condicionado","VW Polo, Hyundai HB20, GM Onix ou similar"]]],
+ ["Intermediário",[["D","Intermediário hatch automático","Hyundai HB20 1.0 Turbo, VW Polo TSI 1.0 ou similar"],["F","Intermediário sedan manual","VW Virtus TSI 1.0, Fiat Cronos 1.3 ou similar"],["FX","Intermediário sedan automático","VW Virtus TSI 1.0, Hyundai HB20S 1.0 Turbo ou similar"]]],
+ ["SUV",[["G","SUV manual","VW Tera ou similar"],["H","SUV compacto automático","Fiat Pulse 1.3, Renault Kardian 1.0 Turbo ou similar"],["HN","SUV automático","Hyundai Creta, Fiat Fastback ou similar"],["HW","SUV automático","VW T-Cross, Nivus ou similar"],["HX","SUV automático","VW Tera Comfort TSI"],["HY","SUV premium automático","Jeep Compass 1.3, VW Taos 1.4 ou similar"],["HZ","SUV híbrido automático","Haval H6, GAC GS4"],["H1","SUV híbrido TANK 300 (GWM)",""],["KX","SUV premium automático 7 lugares","Jeep Commander T270 1.3 ou similar"]]],
+ ["Minivan e executivo",[["K","Minivan automática 7 lugares","GM Spin Premier 1.8 ou similar"],["QX","Executivo sedan automático","Toyota Corolla, VW Virtus Exclusive ou similar"]]],
+ ["Pick-up e furgão",[["L","Pick-up manual com ar condicionado","VW Saveiro 1.6, Fiat Strada 1.3 ou similar"],["LX","Pick-up manual cabine dupla com ar condicionado","Fiat Strada 1.3, VW Saveiro 1.6 ou similar"],["SS","Pick-up 4x2 automático","Fiat Toro ou similar"],["SX","Pick-up 4x4 diesel automático","Ford Ranger ou similar"],["M","Furgão com ar condicionado","Fiat Fiorino 1.3, Renault Kangoo 1.6 ou similar"]]]
+];
+var MOVBASE="https://storage.googleapis.com/movida-public-images/modelos/",MOVIMG={AX:"3210_image.jpg",B:"3241_image.jpg",BS:"2625_image.jpg",BX:"2288_image.jpg",D:"2320_image.jpg",F:"3553_image.jpg",FX:"3224_image.jpg",G:"3539_image.jpg",H:"3474_image.jpg",H1:"3569_image.png",HN:"3433_image.jpg",HW:"3244_image.jpg",HX:"3546_image.jpg",HY:"2667_image.jpg",HZ:"3498_image.jpg",K:"2608_image.jpg",KX:"2666_image.jpg",L:"2291_image.jpg",LX:"3381_image.jpg",M:"2124_image.jpg",QX:"2258_image.jpg",SS:"3441_image.jpg",SX:"2168_image.jpg"};
+function movGrupo(c){var r=null;MOV.forEach(function(g){g[1].forEach(function(x){if(x[0]===c)r={cod:x[0],desc:x[1],modelos:x[2]}})});return r}
+var MLOJ=[
+["AC","Acre","RIO BRANCO AEROPORTO|RIO BRANCO BOSQUE"],["AL","Alagoas","MACEIÓ AEROPORTO|MACEIÓ JATIÚCA"],["AP","Amapá","MACAPA AEROPORTO"],["AM","Amazonas","MANAUS AEROPORTO|MANAUS TORQUATO TAPAJÓS"],
+["BA","Bahia","BARREIRAS|FEIRA DE SANTANA|ILHÉUS AEROPORTO|SALVADOR AEROPORTO|PORTO SEGURO AEROPORTO|SALVADOR - PARALELA|SALVADOR AMARALINA - PITUBA|VITÓRIA DA CONQUISTA AEROPORTO"],
+["CE","Ceará","FORTALEZA AEROPORTO|FORTALEZA MEIRELES|JUAZEIRO DO NORTE - AEROPORTO|JUAZEIRO DO NORTE - VIRGÍLIO TÁVORA"],["DF","Distrito Federal","BRASILIA AEROPORTO|BRASILIA SIA|BRASILIA TAGUATINGA SHOPPING"],
+["ES","Espírito Santo","SERRA|VITORIA SANTA LUCIA|VITÓRIA AEROPORTO"],["GO","Goiás","ANÁPOLIS|APARECIDA DE GOIÂNIA|GOIÂNIA AEROPORTO|GOIÂNIA REPUBLICA DO LÍBANO|GOIÂNIA SETOR COIMBRA|GOIÂNIA T63|RIO VERDE"],
+["MA","Maranhão","IMPERATRIZ AEROPORTO|SÃO LUÍS - SHOPPING DA ILHA|SÃO LUÍS AEROPORTO"],["MT","Mato Grosso","CUIABÁ FERNANDO CORREA|SINOP AEROPORTO|SINOP BRUNO MARTINI|CUIABA AEROPORTO"],["MS","Mato Grosso do Sul","CAMPO GRANDE AEROPORTO|CAMPO GRANDE AV CEARÁ"],
+["MG","Minas Gerais","BELO HORIZONTE - PRADO - TERESA CRISTINA|BELO HORIZONTE BARÃO HOMEM DE MELO|BELO HORIZONTE LOURDES BIAS FORTES|BELO HORIZONTE PAMPULHA ANTONIO CARLOS|BELO HORIZONTE PAMPULHA CATALÃO|BETIM|CONTAGEM|IPATINGA - SHOPPING VALE DO AÇO|JUIZ DE FORA CENTRO|BELO HORIZONTE AEROPORTO CONFINS|MONTES CLAROS AEROPORTO|POUSO ALEGRE|IPATINGA AEROPORTO|UBERABA AEROPORTO|UBERABA SÃO BENEDITO|UBERLÂNDIA AEROPORTO"],
+["PB","Paraíba","JOÃO PESSOA AEROPORTO|CAMPINA GRANDE AEROPORTO|CAMPINA GRANDE CATOLÉ|JOÃO PESSOA EPITÁCIO|JOÃO PESSOA IPÊS"],
+["PR","Paraná","CASCAVEL|CURITIBA REBOUÇAS|CURITIBA SHOPPING|FOZ DO IGUAÇU AEROPORTO|LONDRINA - SHOPPING AURORA|LONDRINA AEROPORTO|MARINGÁ AEROPORTO|MARINGÁ CENTRO|PONTA GROSSA|CURITIBA AEROPORTO"],
+["PA","Pará","BELÉM AEROPORTO|BELÉM MARCO|MARABÁ AEROPORTO EXTERNO|PARAUAPEBAS AEROPORTO|PARAUAPEBAS CENTRO"],["PE","Pernambuco","PATTEO OLINDA SHOPPING|PETROLINA AEROPORTO|RECIFE AEROPORTO|RECIFE ASSAÍ BENFICA|RECIFE ESPINHEIRO"],["PI","Piauí","TERESINA AEROPORTO"],
+["RJ","Rio de Janeiro","CAMPOS DOS GOYTACAZES|DUQUE DE CAXIAS|MACAÉ|NITERÓI|NOVA IGUAÇU|PETRÓPOLIS|RESENDE|RIO DE JANEIRO - BANGU SHOPPING|RIO DE JANEIRO - BARRA DA TIJUCA|RIO DE JANEIRO - BARRA DA TIJUCA AYRTON SENNA|RIO DE JANEIRO - BARRA DA TIJUCA FREEWAY|RIO DE JANEIRO - CAMPO GRANDE|RIO DE JANEIRO - COPACABANA RIO SUL SH|RIO DE JANEIRO - GALEÃO AEROPORTO|RIO DE JANEIRO - JACAREPAGUÁ|RIO DE JANEIRO - LEBLON|RIO DE JANEIRO - MADUREIRA|RIO DE JANEIRO - NORTE SHOPPING|RIO DE JANEIRO - SHOPPING BOULEVARD|RIO DE JANEIRO-SANTOS DUMONT AERO/MARINA GLORIA|RIO DE JANEIRO - SÃO GONÇALO|VOLTA REDONDA - SHOPPING PARK SUL"],
+["RN","Rio Grande do Norte","MOSSORÓ|NATAL PONTA NEGRA|NATAL AEROPORTO"],["RS","Rio Grande do Sul","CANOAS|CAXIAS DO SUL AEROPORTO|NOVO HAMBURGO|PELOTAS|PORTO ALEGRE - CAMPUS PUC|PORTO ALEGRE - SHOPPING BARRA SUL|PORTO ALEGRE AEROPORTO|PORTO ALEGRE CARLOS GOMES"],
+["RO","Rondônia","PORTO VELHO AEROPORTO|PORTO VELHO CENTRO"],["RR","Roraima","BOA VISTA AEROPORTO"],["SC","Santa Catarina","BLUMENAU|CHAPECÓ AEROPORTO|FLORIANÓPOLIS AEROPORTO|JOINVILLE AEROPORTO|JOINVILLE AMÉRICA|NAVEGANTES AEROPORTO|SÃO JOSÉ - ITAGUAÇU SHOPPING"],
+["SP","São Paulo","AMERICANA|ARAÇATUBA|ARARAQUARA|BARUERI - SHOPPING IGUATEMI|BARUERI ALPHAVILLE - TAMBORE|BAURU|CAMPINAS - SHOPPING PARQUE DOM PEDRO|CAMPINAS AEROPORTO|CAMPINAS MORAES SALES|CAMPINAS OROSIMBO|COTIA GRANJA VIANNA SHOPPING|DIADEMA - SHOPPING PRAÇA DA MOÇA|FRANCA|GUARATINGUETÁ|SÃO PAULO - GUARULHOS AEROPORTO|SÃO PAULO - GUARULHOS TIMÓTEO PENTEADO|INDAIATUBA|JACAREÍ|JUNDIAÍ|JUNDIAÍ CICA|LIMEIRA|MARÍLIA|MOGI DAS CRUZES|OSASCO|PIRACICABA|PRESIDENTE PRUDENTE|RIBEIRÃO PRETO AEROPORTO|RIBEIRÃO PRETO CASTELO BRANCO|RIO CLARO|SANTO ANDRÉ|SANTOS - ASSAÍ ANA COSTA|SANTOS AFFONSO PENNA|SÃO BERNARDO DO CAMPO - ASSAI ANCHIETA|SÃO BERNARDO PLAZA SHOPPING|SÃO CAETANO DO SUL|SÃO CARLOS|SÃO JOSÉ DO RIO PRETO AEROPORTO|SÃO JOSÉ DO RIO PRETO ANISIO HADDAD|SÃO JOSÉ DOS CAMPOS - AQUARIUS|SÃO PAULO - ASSAÍ JOÃO DIAS|SÃO PAULO - AVENIDA ARICANDUVA|SÃO PAULO - BARRA FUNDA|SÃO PAULO - BELA VISTA|SÃO PAULO - BUTANTÃ CORIFEU|SÃO PAULO - CONGONHAS - ESTACIONAMENTO DO AEROPORTO|SÃO PAULO - CONSOLAÇÃO|SÃO PAULO - CRUZEIRO DO SUL|SÃO PAULO - ITAIM BIBI BRASCAN|SÃO PAULO - JUSCELINO KUBITSCHEK|SÃO PAULO - NAÇÕES UNIDAS|SÃO PAULO - PENHA|SÃO PAULO - RODOVIÁRIA TIETÊ|SÃO PAULO - SAÚDE|SÃO PAULO - SHOPPING ARICANDUVA|SÃO PAULO - SHOPPING BUTANTÃ|SÃO PAULO - SHOPPING DeD - BROOKLIN|SÃO PAULO - SHOPPING ELDORADO|SÃO PAULO - SHOPPING FREI CANECA|SÃO PAULO - SHOPPING METRÔ ITAQUERA|SÃO PAULO - SHOPPING PATIO PAULISTA|SÃO PAULO - SHOPPING SANTA CRUZ|SÃO PAULO - SHOPPING TUCURUVI|SÃO PAULO - TATUAPÉ - MARGINAL TIETÊ|SÃO PAULO - VILA LEOPOLDINA|SÃO PAULO - WASHINGTON LUIZ|SHOPPING METRÔ TATUAPÉ|SOROCABA - ASSAÍ SANTA ROSÁLIA|SOROCABA CAMPOLIM|SOROCABA VERA CRUZ|SUZANO|TAUBATÉ"],
+["SE","Sergipe","ARACAJU AEROPORTO"],["TO","Tocantins","PALMAS AEROPORTO|PALMAS PRAÇA DOS GIRASSÓIS"]
+];
+function lojaOpts(){var uf=(curCity().match(/,\s*([A-Za-z]{2})$/)||[])[1];uf=uf?uf.toUpperCase():"";var l=MLOJ.slice().sort(function(a,b){return(b[0]===uf)-(a[0]===uf)});return l.map(function(s){return '<optgroup label="'+s[1]+'">'+s[2].split("|").map(function(n){return "<option>"+esc(n)+"</option>"}).join("")+"</optgroup>"}).join("")}
+function nomeField(){
+ if(tab!=="carro")return '<label for="nm">Nome</label><input id="nm">';
+ return '<label for="lc">Locadora</label><select id="lc"><option>Movida</option><option>Localiza</option><option>Rentcars</option><option>Outra</option></select>'+
+  '<div id="gw"><label for="gp">Grupo do carro</label><select id="gp"><option value="">Escolha o grupo</option>'+MOV.map(function(g){return '<optgroup label="'+esc(g[0])+'">'+g[1].map(function(x){return '<option value="'+x[0]+'">Grupo '+x[0]+' · '+esc(x[1])+'</option>'}).join("")+'</optgroup>'}).join("")+'</select><p id="gi" class="m" style="color:var(--mute);font-size:14px;margin:4px 0 0"></p><img id="gf" alt="" hidden style="width:140px;height:auto;max-height:100px;object-fit:cover;border-radius:8px;margin-top:8px"><label for="rt">Loja de retirada</label><select id="rt"><option value="">Escolha a loja</option>'+lojaOpts()+'</select><label for="dv">Loja de devolução</label><select id="dv"><option value="">Mesma loja da retirada</option>'+lojaOpts()+'</select><p id="dn" class="m" style="color:var(--mute);font-size:14px;margin:4px 0 0"></p></div>'+
+  '<div id="cw" hidden><label for="nm">Nome do carro ou grupo</label><input id="nm" placeholder="Ex.: Grupo econômico, Fiat Argo"><label for="rt2">Local de retirada</label><input id="rt2"><label for="dv2">Local de devolução (se for outro)</label><input id="dv2"></div>';
+}
+function nomeCarro(){
+ var lc=document.getElementById("lc");
+ if(!lc)return document.getElementById("nm").value.trim();
+ if(lc.value==="Movida"){var g=movGrupo(document.getElementById("gp").value);return g?"Movida · Grupo "+g.cod+" — "+g.desc+(g.modelos?" ("+g.modelos+")":""):""}
+ var t=document.getElementById("nm").value.trim();return t?(lc.value==="Outra"?t:lc.value+" · "+t):"";
+}
+var S={dest:"",ini:"",fim:"",items:[]},tab="hosp",editing=false;
+try{var r=localStorage.getItem("planejador-viagem");if(r)S=JSON.parse(r)}catch(e){}
+if(!S.cities)S.cities=S.dest?[S.dest]:[];
+(function(){var ch={};(S.items||[]).forEach(function(x){if(x.cat!=="hosp"&&x.cat!=="carro")return;var k=x.cat+"|"+(x.cidade||"");if(x.escolhida===undefined){x.escolhida=!ch[k];ch[k]=true}else if(x.escolhida)ch[k]=true})})();
+var cur=0,pend=[];
+function curCity(){return S.cities[cur]||S.dest}
+var st;function save(){try{localStorage.setItem("planejador-viagem",JSON.stringify(S))}catch(e){}clearTimeout(st);st=setTimeout(function(){fetch("/api/trip",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(S)}).catch(function(){})},300)}
+function cidadeItem(){var v=document.getElementById("cd").value.trim()||curCity();return S.cities.length===1&&v===S.cities[0]?"":v}
+function jget(u){return fetch(u).then(function(r){return r.json()})}
+function nrm(s){return String(s).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim()}
+function matchCity(c){var k=nrm(c),r=S.cities.filter(function(x){return nrm(x.split(",")[0])===k})[0];return r||c}
+var PL=[];function allD(){return DESTS.concat(S.custom||[],PL)}
+function esc(t){return String(t).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function money(v){return Number(v||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}
+function fdate(s){var p=s.split("-");return p[2]+"/"+p[1]}
+function days(){var o=[];if(!S.ini||!S.fim)return o;var d=new Date(S.ini+"T12:00:00"),e=new Date(S.fim+"T12:00:00");while(d<=e&&o.length<60){o.push(d.toISOString().slice(0,10));d.setDate(d.getDate()+1)}return o}
+function q(s){return encodeURIComponent(s)}
+function searches(id){
+ var d=curCity(),L=[];
+ if(id==="hosp")L=[["Buscar no Airbnb","https://www.airbnb.com.br/s/"+q(d)+"/homes?checkin="+S.ini+"&checkout="+S.fim],["Ver no mapa","https://www.google.com/maps/search/"+q("hospedagem em "+d)]];
+ if(id==="trans")L=[["Buscar ônibus (Buser)","https://www.buser.com.br"],["Buscar ônibus (ClickBus)","https://www.clickbus.com.br"],["Rotas no Google Maps","https://www.google.com/maps/dir//"+q(d)]];
+ if(id==="carro")L=[["Localiza","https://www.localiza.com"],["Movida","https://www.movida.com.br"],["Rentcars (compara várias)","https://www.rentcars.com"],["Locadoras no mapa","https://www.google.com/maps/search/"+q("aluguel de carros em "+d)]];
+ if(id==="comer")L=[["Restaurantes no mapa","https://www.google.com/maps/search/"+q("restaurantes em "+d)]];
+ if(id==="ver")L=[["Atrações no mapa","https://www.google.com/maps/search/"+q("pontos turísticos em "+d)],["Guia de "+d,"https://www.google.com/search?q="+q("o que fazer em "+d)]];
+ return L.map(function(x){return '<a class="btn ghost" target="_blank" rel="noopener noreferrer" href="'+esc(x[1])+'">'+esc(x[0])+'</a>'}).join("");
+}
+function shrink(file,cb){var r=new FileReader();r.onload=function(){var im=new Image();im.onload=function(){var s=Math.min(1,480/Math.max(im.width,im.height)),c=document.createElement("canvas");c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);c.getContext("2d").drawImage(im,0,0,c.width,c.height);cb(c.toDataURL("image/jpeg",0.7))};im.onerror=function(){cb("")};im.src=r.result};r.onerror=function(){cb("")};r.readAsDataURL(file)}
+function safeUrl(u){u=(u||"").trim();if(!u)return"";if(!/^https?:\/\//i.test(u))u="https://"+u;return u}
+function nights(a,b){var n=Math.round((new Date(b+"T12:00:00")-new Date(a+"T12:00:00"))/864e5);return n+(n===1?" noite":" noites")}
+function pickable(c){return c==="hosp"||c==="carro"}
+function counted(){return S.items.filter(function(x){return !pickable(x.cat)||x.escolhida})}
+function ndays(a,b){if(!a||!b)return 0;return Math.max(1,Math.round((new Date(b+"T12:00:00")-new Date(a+"T12:00:00"))/864e5))}
+function diarias(a,b){var n=ndays(a,b);return n+(n===1?" diária":" diárias")}
+function fdateY(s){var p=s.split("-");return p[2]+"/"+p[1]+"/"+p[0]}
+function itemHtml(it,pick){
+ var meta=[it.cidade,it.nota,it.diaria?money(it.diaria)+"/dia":"",it.dia?(it.fim?fdate(it.dia)+" a "+fdate(it.fim)+" ("+(it.cat==="carro"?diarias(it.dia,it.fim):nights(it.dia,it.fim))+")":fdate(it.dia)):"",it.hin?"check-in a partir das "+it.hin:"",it.hout?"check-out até "+it.hout:"",it.ret?(it.dev&&it.dev!==it.ret?"retirada: "+it.ret+" → devolução: "+it.dev:"retirada e devolução: "+it.ret):""].filter(Boolean).join(" · ");
+ return '<div class="item"><div class="l">'+(it.foto?'<img class="th" alt="" src="'+it.foto+'">':'')+'<div><div class="n">'+esc(it.nome)+(pick===true&&it.escolhida?' <span class="ok">Escolhida</span>':'')+'</div><div class="m">'+esc(meta)+" "+(it.link?' <a target="_blank" rel="noopener noreferrer" href="'+esc(it.link)+'">abrir link</a>':"")+'</div></div></div><div><div class="p">'+(it.preco?money(it.preco):"")+'</div>'+(pick===true?'<button class="ghost" style="padding:4px 10px;font-size:14px" data-pick="'+it.id+'">'+(it.escolhida?'Desmarcar':'Escolher')+'</button><br>':'')+'<button class="x" data-del="'+it.id+'">Remover</button></div></div>';
+}
+function render(){
+ var a=document.getElementById("app");
+ if(!S.dest||!S.ini||!S.fim||editing){
+  a.innerHTML='<div class="setup"><h1>Para onde você vai?</h1><p>Adicione uma ou mais cidades e escolha as datas. Você pode mudar depois.</p><div class="chips" id="chips"></div><label for="d">Cidade</label><input id="d" list="dl" autocomplete="off" placeholder="Comece a digitar: Gramado, Lisboa..." value=""><div style="margin-top:8px"><button class="ghost" id="inc" type="button">Incluir cidade na viagem</button></div><datalist id="dl">'+allD().map(function(x){return '<option value="'+esc(x)+'">'}).join("")+'</datalist><p style="margin:6px 0 0;font-size:14px"><a id="mp" target="_blank" rel="noopener noreferrer" style="color:var(--acc)" href="https://www.google.com/maps">Conferir no Google Maps</a></p><div id="nw" hidden style="margin-top:8px"><button class="ghost" id="nb" type="button">Adicionar</button></div><div id="cf" hidden class="panel" style="margin-top:10px"><p style="margin:0 0 4px"><b>Esse é o lugar certo?</b></p><p style="margin:0;color:var(--mute);font-size:14px">Confira no Maps que abriu. Se o nome estiver diferente, corrija aqui como aparece lá (ex.: Nova Petrópolis, RS).</p><input id="cn" style="margin-top:8px"><div class="row" style="margin-top:10px"><button id="cy" type="button">Sim, adicionar</button><button id="cx" class="ghost" type="button">Não, voltar</button></div></div><div class="row"><div><label for="i">Ida</label><input id="i" type="date" value="'+S.ini+'"></div><div><label for="f">Volta</label><input id="f" type="date" value="'+S.fim+'"></div></div><p class="err" id="e"></p><button id="go">Começar a planejar</button></div>';
+  var mp=document.getElementById("mp"),di=document.getElementById("d");
+  var nw=document.getElementById("nw"),nb=document.getElementById("nb"),dl=document.getElementById("dl"),cf=document.getElementById("cf"),cn=document.getElementById("cn");
+  function tc(s){var sm=["de","da","do","das","dos","e"];return s.toLowerCase().split(/\s+/).map(function(w,i){return i>0&&sm.indexOf(w)>-1?w:w.charAt(0).toUpperCase()+w.slice(1)}).join(" ").replace(/,\s*([A-Za-z]{2})$/,function(m,u){return", "+u.toUpperCase()})}
+  function known(v){return allD().some(function(x){return x.toLowerCase()===v.toLowerCase()})}
+  function upMp(){
+   var v=di.value.trim();
+   mp.href="https://www.google.com/maps/search/"+q(v);
+   nw.hidden=!(v&&!known(v)&&cf.hidden);
+  }
+  var pt;di.oninput=function(){cf.hidden=true;upMp();clearTimeout(pt);var v=di.value.trim();pt=setTimeout(function(){jget("/api/places?q="+q(v)).then(function(l){l.forEach(function(x){if(PL.indexOf(x.nome)<0){PL.push(x.nome);var o=document.createElement("option");o.value=x.nome;dl.appendChild(o)}});upMp()}).catch(function(){})},450)};upMp();
+  function canon(v){return allD().filter(function(x){return x.toLowerCase()===v.toLowerCase()})[0]||v}
+  function drawChips(){
+   var c=document.getElementById("chips");
+   c.innerHTML=pend.map(function(x,k){return '<span class="chip">'+esc(x)+'<button class="x" type="button" data-rm="'+k+'" aria-label="Remover '+esc(x)+'">×</button></span>'}).join("");
+   Array.prototype.forEach.call(c.querySelectorAll("[data-rm]"),function(b){b.onclick=function(){pend.splice(+b.dataset.rm,1);drawChips()}});
+  }
+  drawChips();
+  document.getElementById("inc").onclick=function(){
+   var v=di.value.trim(),e=document.getElementById("e");e.textContent="";
+   if(!v)return;
+   if(!known(v)){e.textContent="Confirme esse lugar com o botão Adicionar antes de incluir na viagem.";return}
+   v=canon(v);if(pend.indexOf(v)<0)pend.push(v);
+   di.value="";cf.hidden=true;upMp();drawChips();
+  };
+  nb.onclick=function(){
+   var v=di.value.trim();if(!v||known(v))return;
+   window.open("https://www.google.com/maps/search/"+q(v),"_blank","noopener");
+   cn.value=tc(v);cf.hidden=false;upMp();
+  };
+  document.getElementById("cy").onclick=function(){
+   var v=cn.value.trim();if(!v)return;
+   if(!known(v)){S.custom=(S.custom||[]).concat([v]);save();var o=document.createElement("option");o.value=v;dl.appendChild(o)}
+   di.value=v;cf.hidden=true;upMp();
+  };
+  document.getElementById("cx").onclick=function(){cf.hidden=true;upMp()};
+  var ii=document.getElementById("i"),fi=document.getElementById("f");
+  function upMin(){fi.min=ii.value||"";if(ii.value&&fi.value&&fi.value<ii.value)fi.value=""}
+  ii.oninput=upMin;ii.onchange=upMin;upMin();
+  document.getElementById("go").onclick=function(){
+   var d=document.getElementById("d").value.trim(),i=document.getElementById("i").value,f=document.getElementById("f").value,e=document.getElementById("e");
+   if(d){if(!known(d)){e.textContent="Confirme esse lugar com o botão Adicionar antes de começar.";return}d=canon(d);if(pend.indexOf(d)<0)pend.push(d)}
+   if(!pend.length){e.textContent="Adicione pelo menos uma cidade.";return}
+   if(!i||!f){e.textContent="Escolha as datas de ida e volta.";return}
+   if(f<i){e.textContent="A volta precisa ser depois da ida.";return}
+   S.cities=pend.slice();S.dest=pend.join(" e ");cur=0;S.ini=i;S.fim=f;editing=false;save();render()};
+  return;
+ }
+ var total=counted().reduce(function(s,x){return s+(Number(x.preco)||0)},0),n=days().length;
+ var h='<div class="ticket"><div><small>Viagem para</small><h1>'+esc(S.cities.join(" → "))+'</h1><small>'+fdate(S.ini)+' a '+fdate(S.fim)+' · '+n+(n===1?" dia":" dias")+'</small></div><div class="tot"><small>Custo total</small><b>'+money(total)+'</b><br><button class="ghost" id="ed" style="margin-top:8px;padding:4px 10px;color:var(--accink);border-color:var(--accink)">Mudar destino e datas</button></div></div>';
+ h+='<div class="tabs" role="tablist">'+CATS.concat([{id:"res",nome:"Resumo"}]).map(function(c){return '<button role="tab" aria-selected="'+(tab===c.id)+'" data-tab="'+c.id+'">'+c.nome+'</button>'}).join("")+'</div>';
+ if(tab==="res"){
+  h+='<div class="panel"><h2 style="font-size:20px;margin-bottom:8px">Quanto vai custar</h2><table class="sum">'+CATS.map(function(c){var t=counted().filter(function(x){return x.cat===c.id}).reduce(function(s,x){return s+(Number(x.preco)||0)},0);return '<tr><td>'+c.nome+'</td><td>'+money(t)+'</td></tr>'}).join("")+'<tr><td><b>Total</b></td><td>'+money(total)+'</td></tr></table><div class="row" style="margin-bottom:12px"><a class="btn ghost" href="/api/calendar.ics">Exportar para o calendário</a><a class="btn ghost" href="/api/backup">Baixar backup</a></div><div id="wx"></div><h2 style="font-size:20px">Roteiro por dia</h2>';
+  var any=false;
+  days().forEach(function(d,k){var l=counted().filter(function(x){return x.dia===d});if(l.length){any=true;h+='<div class="day"><h3>Dia '+(k+1)+' · '+fdate(d)+'</h3>'+l.map(itemHtml).join("")+'</div>'}});
+  var sem=counted().filter(function(x){return !x.dia});
+  if(sem.length){any=true;h+='<div class="day"><h3>Sem dia definido</h3>'+sem.map(itemHtml).join("")+'</div>'}
+  if(!any)h+='<p class="empty">Ainda não há nada no roteiro. Salve opções nas outras abas.</p>';
+  h+='</div>';
+ }else{
+  var c=CATS.filter(function(x){return x.id===tab})[0],l=S.items.filter(function(x){return x.cat===tab});
+  h+='<div class="panel">'+(S.cities.length>1?'<label for="ct" style="margin-top:0">Cidade da busca</label><select id="ct" style="margin-bottom:12px">'+S.cities.map(function(x,k){return '<option value="'+k+'"'+(k===cur?' selected':'')+'>'+esc(x)+'</option>'}).join("")+'</select>':"")+'<div class="searches">'+searches(tab)+'</div><p class="m" style="color:var(--mute);font-size:14px;margin:0 0 8px">Busque no site, escolha a opção e salve abaixo.</p>'+(tab==="carro"?'<div class="panel" style="background:var(--bg);margin-bottom:8px"><b>Dados para preencher na busca</b><div class="m" style="color:var(--mute);font-size:14px;margin:4px 0 8px">'+esc(curCity())+'<br>Retirada '+fdateY(S.ini)+' · Devolução '+fdateY(S.fim)+' · '+diarias(S.ini,S.fim)+'</div><button class="ghost" id="cp" type="button" style="padding:6px 12px;font-size:14px">Copiar dados</button> <span id="cpm" class="m" style="color:var(--mute);font-size:14px"></span></div>':"")+
+  ''+nomeField()+'<label for="cd">Cidade</label><input id="cd" list="cdl" value="'+esc(curCity())+'"><datalist id="cdl">'+S.cities.map(function(x){return '<option value="'+esc(x)+'">'}).join("")+'</datalist>'+
+  '<div class="row">'+(tab==="carro"?'<div><label for="dr">Diária (R$)</label><input id="dr" type="number" min="0" step="0.01" inputmode="decimal"></div>':"")+'<div><label for="pr">'+(tab==="carro"?"Total (R$)":"Preço (R$)")+'</label><input id="pr" type="number" min="0" step="0.01" inputmode="decimal"></div>'+(tab==="carro"?'<div><label for="ci">Retirada</label><input id="ci" type="date" min="'+S.ini+'" max="'+S.fim+'" value="'+S.ini+'"></div><div><label for="co">Devolução</label><input id="co" type="date" min="'+S.ini+'" max="'+S.fim+'" value="'+S.fim+'"></div>':tab==="hosp"?'<div><label for="ci">Check-in</label><input id="ci" type="date" min="'+S.ini+'" max="'+S.fim+'"></div><div><label for="co">Check-out</label><input id="co" type="date" min="'+S.ini+'" max="'+S.fim+'"></div><div><label for="hi">Check-in a partir de</label><input id="hi" type="time"></div><div><label for="ho">Check-out até</label><input id="ho" type="time"></div>':'<div><label for="dy">Dia</label><select id="dy"><option value="">Sem dia definido</option>'+days().map(function(d,k){return '<option value="'+d+'">Dia '+(k+1)+' · '+fdate(d)+'</option>'}).join("")+'</select></div>')+'</div>'+
+  '<p id="cc" class="m" style="color:var(--mute);font-size:14px;margin:6px 0 0"></p>'+(tab==="carro"?"":'<label for="lk">Link</label><input id="lk" placeholder="Cole aqui o link que você copiou"><label for="ft">Foto principal (opcional)</label><input id="ft" type="file" accept="image/*">')+'<label for="nt">Observação</label><input id="nt">'+
+  '<p class="err" id="e"></p><button id="add">'+c.add+'</button></div><div class="panel" style="margin-top:12px">'+(l.length?(pickable(tab)?'<p style="color:var(--mute);font-size:14px;margin:0 0 6px">Salve quantas opções quiser e escolha uma'+(S.cities.length>1?' por cidade':'')+'. Só a escolhida entra no custo total.</p>':"")+l.map(function(x){return itemHtml(x,pickable(tab))}).join(""):'<p class="empty" style="margin:0">'+c.vazio+'</p>')+'</div>';
+ }
+ a.innerHTML=h;
+ var wx=document.getElementById("wx");
+ if(wx)jget("/api/weather?ini="+S.ini+"&fim="+S.fim+"&cities="+S.cities.map(q).join("|")).then(function(w){var h2="";Object.keys(w).forEach(function(c){if(!w[c].length)return;h2+='<p style="margin:8px 0 2px"><b>Previsão · '+esc(c)+'</b></p><div class="m" style="color:var(--mute);font-size:14px">'+w[c].map(function(x){return fdate(x.dia)+": "+Math.round(x.min)+"°–"+Math.round(x.max)+"°, chuva "+(x.chuva==null?"?":x.chuva)+"%"}).join("<br>")+"</div>"});if(h2)wx.innerHTML=h2+"<br>"}).catch(function(){});
+ document.getElementById("ed").onclick=function(){pend=S.cities.slice();editing=true;render()};
+ var ci=document.getElementById("ci"),co=document.getElementById("co");
+ if(ci&&co)ci.onchange=function(){co.min=ci.value||S.ini;if(co.value&&co.value<ci.value)co.value=""};
+ var dr=document.getElementById("dr");
+ if(dr&&ci&&co){
+  var pr=document.getElementById("pr"),cc=document.getElementById("cc");
+  var calc=function(){var n=ndays(ci.value,co.value);cc.textContent=n?"Período: "+diarias(ci.value,co.value)+(dr.value?" × "+money(dr.value)+" = "+money(dr.value*n):""):"";if(n&&dr.value)pr.value=(dr.value*n).toFixed(2)};
+  ["input","change"].forEach(function(ev){dr.addEventListener(ev,calc);ci.addEventListener(ev,calc);co.addEventListener(ev,calc)});
+  calc();
+ }
+ var lc=document.getElementById("lc");
+ if(lc){
+  var gp=document.getElementById("gp"),gw=document.getElementById("gw"),cw=document.getElementById("cw"),gi=document.getElementById("gi");
+  var upI=function(){var g=movGrupo(gp.value);gi.textContent=(g&&g.modelos?"Ex.: "+g.modelos+". ":"")+"A Movida reserva por grupo, não por modelo."};
+  var upF=function(){
+   var f=MOVIMG[gp.value],im=document.getElementById("gf");
+   if(!f){im.hidden=true;window.autoFoto="";return}
+   var u=MOVBASE+f;im.onerror=function(){im.hidden=true};im.src=u;im.hidden=false;window.autoFoto=u;
+   jget("/api/foto?url="+q(u)).then(function(d){if(d&&d.foto&&MOVIMG[gp.value]===f)window.autoFoto=d.foto}).catch(function(){});
+  };
+  var upG=function(){var mv=lc.value==="Movida";gw.hidden=!mv;cw.hidden=mv;if(mv)upF();else window.autoFoto=""};
+  var rt=document.getElementById("rt"),dv=document.getElementById("dv"),dn=document.getElementById("dn");
+  var upN=function(){dn.textContent=dv.value&&rt.value&&dv.value!==rt.value?"Devolver em outra loja pode ter taxa de devolução, somada ao valor da reserva.":""};
+  rt.onchange=upN;dv.onchange=upN;
+  lc.onchange=upG;gp.onchange=function(){upI();upF()};upG();upI();
+ }
+ var cp=document.getElementById("cp");
+ if(cp)cp.onclick=function(){var t=curCity()+", retirada "+fdateY(S.ini)+", devolução "+fdateY(S.fim),m=document.getElementById("cpm");(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){m.textContent="Copiado."}).catch(function(){m.textContent=t})};
+ var ct=document.getElementById("ct");
+ if(ct)ct.onchange=function(){cur=+ct.value;render()};
+ Array.prototype.forEach.call(a.querySelectorAll("[data-tab]"),function(b){b.onclick=function(){tab=b.dataset.tab;render()}});
+ Array.prototype.forEach.call(a.querySelectorAll("[data-del]"),function(b){b.onclick=function(){S.items=S.items.filter(function(x){return String(x.id)!==b.dataset.del});save();render()}});
+ Array.prototype.forEach.call(a.querySelectorAll("[data-pick]"),function(b){b.onclick=function(){var it=S.items.filter(function(x){return String(x.id)===b.dataset.pick})[0];if(!it)return;var was=it.escolhida;S.items.forEach(function(x){if(x.cat===it.cat&&(x.cidade||"")===(it.cidade||""))x.escolhida=false});it.escolhida=!was;save();render()}});
+ var add=document.getElementById("add");
+ if(add)add.onclick=function(){
+  var nm=nomeCarro();
+  if(!nm){document.getElementById("e").textContent=tab==="carro"?"Escolha o grupo do carro (ou digite um nome) para salvar.":"Dê um nome para salvar.";return}
+  if(tab==="hosp"||tab==="carro"){var a=document.getElementById("ci").value,b=document.getElementById("co").value,er=document.getElementById("e"),k=tab==="carro";if((a||b)&&!(a&&b)){er.textContent=k?"Escolha a retirada e a devolução.":"Escolha o check-in e o check-out.";return}if(a&&b&&b<a){er.textContent=k?"A devolução precisa ser depois da retirada.":"O check-out precisa ser depois do check-in.";return}}
+  var lcE=document.getElementById("lc"),mvE=lcE&&lcE.value==="Movida",gv=function(i){var e=document.getElementById(i);return e?e.value.trim():""},ret=lcE?gv(mvE?"rt":"rt2"):"",dev=lcE?gv(mvE?"dv":"dv2"):"";
+  if(mvE&&!ret){document.getElementById("e").textContent="Escolha a loja de retirada.";return}
+  if(ret&&!dev)dev=ret;
+  var ftE=document.getElementById("ft"),fl=ftE?ftE.files[0]:null;
+  var fin=function(foto){S.items.push({id:Date.now(),foto:foto||"",cat:tab,escolhida:false,cidade:cidadeItem(),nome:nm,preco:document.getElementById("pr").value,dia:(document.getElementById("dy")||document.getElementById("ci")).value,fim:pickable(tab)?document.getElementById("co").value:"",diaria:tab==="carro"?document.getElementById("dr").value:"",ret:ret,dev:dev,hin:tab==="hosp"?document.getElementById("hi").value:"",hout:tab==="hosp"?document.getElementById("ho").value:"",link:document.getElementById("lk")?safeUrl(document.getElementById("lk").value):"",nota:document.getElementById("nt").value.trim()});save();render()};
+  if(fl)shrink(fl,fin);else fin(window.autoFoto||"");};
+ var lk=document.getElementById("lk");
+ var fill=function(loud){
+  var er=document.getElementById("e");er.textContent="";
+  var v=lk.value,md=v.match(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/),url,title="";
+  if(md){title=md[1];url=md[2]}
+  else{var m=v.match(/https?:\/\/[^\s)]+/);if(!m){if(loud)er.textContent="Cole primeiro o link no campo.";return}url=m[0];title=v.replace(url,"")}
+  title=title.replace(/\s+/g," ").trim();
+  var p=title.split(" - ");
+  if(p[p.length-1]==="Airbnb"){p.pop();if(p.length>1)p.pop()}
+  title=p.join(" - ");
+  if(lk.value!==url)lk.value=url;
+  var nmEl=document.getElementById("nm");
+  if(title&&!nmEl.value.trim()){nmEl.value=title}
+  else if(loud){er.textContent=title?"O campo Nome já estava preenchido. Apague-o e tente de novo.":"O texto colado só tem o link, sem o nome da hospedagem. Copie o título junto com o link ou digite o nome."}
+ };
+ var lt;window.autoFoto="";
+ function aplicar(d){
+  var g=function(i){return document.getElementById(i)},er=g("e"),ok=[],av="";
+  if(!er)return;
+  function set(i,v,lbl,force){var el=g(i);if(el&&v&&(force||!el.value.trim())){el.value=v;ok.push(lbl)}}
+  set("nm",d.nome,"nome");set("pr",d.preco,"preço");set("nt",d.nota,"observação");
+  if(d.cidade)set("cd",matchCity(d.cidade),"cidade",true);
+  if(d.foto){window.autoFoto=d.foto;ok.push("foto")}
+  if(g("ci")){
+   if(d.ci&&d.co){if(d.ci>=S.ini&&d.co<=S.fim&&d.co>d.ci){g("ci").value=d.ci;g("co").min=d.ci;g("co").value=d.co;ok.push("check-in e check-out")}else av=" As datas do link ("+fdate(d.ci)+" a "+fdate(d.co)+") estão fora das datas da viagem e não foram preenchidas."}
+   set("hi",d.hin,"horário de check-in");
+  }
+  er.textContent=(ok.length?"Preenchido: "+ok.join(", ")+". Confira antes de salvar.":"Não encontrei dados nesse link.")+av;
+ }
+ if(lk)lk.oninput=function(){fill(false);clearTimeout(lt);var m=lk.value.match(/https?:\/\/[^\s)]+/);if(!m)return;lt=setTimeout(function(){var er=document.getElementById("e");if(er)er.textContent="Buscando dados do link...";jget("/api/preview?url="+q(m[0])).then(aplicar).catch(function(){var er=document.getElementById("e");if(er)er.textContent=""})},600)};
+}
+jget("/api/trip").then(function(t){if(t&&t.items){S=t;if(!S.cities)S.cities=S.dest?[S.dest]:[]}else if(S.items&&S.items.length){save()}render()}).catch(function(){render()});
+</script>
+</body>
+</html>
