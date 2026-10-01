@@ -170,15 +170,19 @@ async function restInfo(urls) {
   return out;
 }
 const CATKEYS = { "Pizza":"pizza","Hambúrguer":"burger","Carnes e churrasco":"steak_house|barbecue","Italiana":"italian|pasta","Massas":"pasta","Japonesa":"japanese|sushi","Fondue":"fondue","Alemã":"german","Frutos do mar":"seafood|fish","Vegetariana":"vegetarian|vegan","Brasileira":"brazilian|regional" };
-async function restaurantes(cidade, raio, cat) {
-  raio = Math.min(Math.max(+raio || 4000, 1000), 15000);
-  const k = `r:${cidade}:${raio}:${cat || ""}`; if (cache.has(k)) return cache.get(k);
+const ACC = { a: "[aàáâãä]", e: "[eéèêë]", i: "[iíìîï]", o: "[oóòôõö]", u: "[uúùûü]", c: "[cç]", n: "[nñ]" };
+// Nome digitado -> padrão que ignora maiúsculas e acentos (só letras, números, espaço, ' e -)
+const nomeRe = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9 '-]/g, "").trim().slice(0, 60).replace(/[aeioucn]/g, ch => ACC[ch]);
+async function restaurantes(cidade, raio, cat, nome) {
+  raio = Math.min(Math.max(+raio || 4000, 1000), 16000);
+  const nre = nomeRe(nome);
+  const k = `r:${cidade}:${raio}:${cat || ""}:${nre}`; if (cache.has(k)) return cache.get(k);
   const c = (await places(cidade))[0]; if (!c) return [];
   let filtro = '["amenity"~"^(restaurant|cafe|bar|pub)$"]';
   if (cat === "Café") filtro = '["amenity"="cafe"]';
   else if (cat === "Bar") filtro = '["amenity"~"^(bar|pub)$"]';
   else if (CATKEYS[cat]) filtro += `["cuisine"~"${CATKEYS[cat]}"]`;
-  const qy = `[out:json][timeout:25];nwr${filtro}["name"](around:${raio},${c.lat},${c.lon});out center 400;`;
+  const qy = `[out:json][timeout:25];nwr${filtro}${nre ? `["name"~"${nre}",i]` : '["name"]'}(around:${raio},${c.lat},${c.lon});out center ${raio > 8000 ? 800 : 400};`;
   const r = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded" }, body: "data=" + encodeURIComponent(qy), signal: AbortSignal.timeout(30000) });
   if (!r.ok) throw new Error("O serviço de mapas está ocupado. Tente de novo em instantes.");
   const j = await r.json();
@@ -257,7 +261,7 @@ export async function handler(event) {
     if (p === "/api/preview") { const url = q.url || ""; if (!url) return json(400, { erro: "URL não informada" }); try { return json(200, await preview(S, url)); } catch (e) { return json(400, { erro: e.message || "Não foi possível processar o link" }); } }
     if (p === "/api/restinfo") { const l = ["site", "insta"].map(k => q[k] || "").filter(x => /^https?:\/\//i.test(x)); return json(200, l.length ? await restInfo(l) : { faixa: "", horario: "", avaliacao: "", fonte: "" }); }
     if (p === "/api/foto") { let f; try { f = new URL(q.url || ""); } catch { return json(400, { erro: "URL inválida" }); } if (f.hostname !== "storage.googleapis.com" || !f.pathname.startsWith("/movida-public-images/")) return json(400, { erro: "origem não permitida" }); return json(200, { foto: await baixarFoto(S, f.href) }); }
-    if (p === "/api/restaurants") { const c = (q.city || "").trim(); if (c.length < 3) return json(400, { erro: "Cidade não informada" }); try { return json(200, await restaurantes(c, q.r, q.cat)); } catch (e) { return json(502, { erro: e.message || "Não foi possível buscar restaurantes agora." }); } }
+    if (p === "/api/restaurants") { const c = (q.city || "").trim(); if (c.length < 3) return json(400, { erro: "Cidade não informada" }); try { return json(200, await restaurantes(c, q.r, q.cat, q.nome)); } catch (e) { return json(502, { erro: e.message || "Não foi possível buscar restaurantes agora." }); } }
     if (p === "/api/places") { const t = (q.q || "").trim(); return json(200, t.length < 3 ? [] : await places(t)); }
     if (p === "/api/weather") { const c = (q.cities || "").split("|").filter(Boolean), out = {}; for (const x of c) out[x] = await clima(x, q.ini, q.fim).catch(() => []); return json(200, out); }
     if (p === "/api/calendar.ics") { const id = q.id; const t = okId(id) ? await S.trips.get(id, { type: "json" }) : null; if (!t) return json(404, { erro: "viagem não encontrada" }); return json(200, ics(t), { "Content-Type": "text/calendar; charset=utf-8", "Content-Disposition": 'attachment; filename="viagem.ics"' }); }

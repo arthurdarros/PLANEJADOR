@@ -89,7 +89,7 @@ var MLOJ=[
 function lojaOpts(){var uf=(curCity().match(/,\s*([A-Za-z]{2})$/)||[])[1];uf=uf?uf.toUpperCase():"";var l=MLOJ.slice().sort(function(a,b){return(b[0]===uf)-(a[0]===uf)});return l.map(function(s){return '<optgroup label="'+s[1]+'">'+s[2].split("|").map(function(n){return "<option>"+esc(n)+"</option>"}).join("")+"</optgroup>"}).join("")}
 var CATR=["Pizza","Hambúrguer","Carnes e churrasco","Italiana","Massas","Japonesa","Fondue","Alemã","Frutos do mar","Vegetariana","Brasileira","Café","Bar"];
 function comerBusca(){
- return '<div class="panel" style="background:var(--bg);margin-bottom:12px"><b>Buscar restaurantes na região</b><div class="row"><div><label for="rc">Categoria</label><select id="rc"><option value="">Todas</option>'+CATR.map(function(c){return "<option>"+c+"</option>"}).join("")+'</select></div><div><label for="rr">Raio</label><select id="rr"><option value="2000">2 km</option><option value="4000" selected>4 km</option><option value="8000">8 km</option></select></div></div><div style="margin-top:10px"><button class="ghost" id="rb" type="button">Buscar em '+esc(curCity())+'</button></div><p id="rm" class="m" style="color:var(--mute);font-size:14px;margin:8px 0 0"></p><div id="rl"></div></div>';
+ return '<div class="panel" style="background:var(--bg);margin-bottom:12px"><b>Buscar restaurantes na região</b><label for="rn">Nome do restaurante (opcional)</label><input id="rn" placeholder="Ex.: Pizzaria do Zé" autocomplete="off"><div class="row"><div><label for="rc">Categoria</label><select id="rc"><option value="">Todas</option>'+CATR.map(function(c){return "<option>"+c+"</option>"}).join("")+'</select></div><div><label for="rr">Raio: <b id="rrv">4 km</b></label><input id="rr" type="range" min="1" max="16" step="1" value="4" style="padding:0;height:40px;accent-color:var(--acc)"></div></div><div style="margin-top:10px"><button class="ghost" id="rb" type="button">Buscar em '+esc(curCity())+'</button></div><p id="rm" class="m" style="color:var(--mute);font-size:14px;margin:8px 0 0"></p><div id="rl"></div></div>';
 }
 function comerFields(){
  return '<div class="row"><div><label for="cg">Categoria</label><input id="cg" list="cgl" placeholder="Pizza, Hambúrguer..."><datalist id="cgl">'+CATR.map(function(c){return '<option value="'+c+'">'}).join("")+'</datalist></div><div><label for="fp">Faixa de preço</label><select id="fp"><option value="">Não informada</option><option value="$">$ · econômico</option><option value="$$">$$ · moderado</option><option value="$$$">$$$ · caro</option><option value="$$$$">$$$$ · sofisticado</option></select></div><div><label for="av">Nota (0 a 5)</label><input id="av" type="number" min="0" max="5" step="0.1" inputmode="decimal"></div></div><label for="hr">Horário de funcionamento</label><input id="hr" placeholder="Ex.: Seg-Sex 11h-23h">';
@@ -131,8 +131,8 @@ var S={dest:"",ini:"",fim:"",items:[],cities:[]},tab="hosp",editing=false,view="
 function prep(t){if(!t.cities)t.cities=t.dest?[t.dest]:[];var ch={};(t.items||[]).forEach(function(x){if(x.cat==="comer"&&x.escolhida===undefined)x.escolhida=true;if(x.cat!=="hosp"&&x.cat!=="carro")return;var k=x.cat+"|"+(x.cidade||"");if(x.escolhida===undefined){x.escolhida=!ch[k];ch[k]=true}else if(x.escolhida)ch[k]=true});return t}
 var cur=0,pend=[];
 function curCity(){return S.cities[cur]||S.dest}
-var st={};function save(){if(!TID||!S.dest)return;var id=TID,body=JSON.stringify(S);clearTimeout(st[id]);st[id]=setTimeout(function(){fetch("/api/trips/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:body}).then(function(r){if(!r.ok)throw 0;saveWarn(false)}).catch(function(){saveWarn(true)})},300)}
-function saveWarn(on){var b=document.getElementById("sv");if(!b){b=document.createElement("div");b.id="sv";b.setAttribute("role","alert");b.style.cssText="position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));background:var(--del);color:#fff;border-radius:10px;padding:10px 14px;font-size:14px;z-index:9;display:none";b.textContent="Não foi possível salvar no servidor. Suas alterações podem se perder ao fechar a página.";document.body.appendChild(b)}b.style.display=on?"block":"none"}
+var st={};function save(){if(!TID||!S.dest)return;var id=TID,body=JSON.stringify(S);clearTimeout(st[id]);st[id]=setTimeout(function(){fetch("/api/trips/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:body}).then(function(r){if(r.ok){saveWarn(false);return}return r.text().then(function(t){var m="";try{m=JSON.parse(t).erro}catch(e){}throw m||("HTTP "+r.status)})}).catch(function(e){saveWarn(true,typeof e==="string"?e:"sem conexão com o servidor")})},300)}
+function saveWarn(on,msg){var b=document.getElementById("sv");if(!b){b=document.createElement("div");b.id="sv";b.setAttribute("role","alert");b.style.cssText="position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));background:var(--del);color:#fff;border-radius:10px;padding:10px 14px;font-size:14px;z-index:9;display:none";document.body.appendChild(b)}b.textContent="Não foi possível salvar no servidor"+(msg?" ("+msg+")":"")+". Suas alterações podem se perder ao fechar a página.";b.style.display=on?"block":"none"}
 function cidadeItem(){var v=document.getElementById("cd").value.trim()||curCity();return S.cities.length===1&&v===S.cities[0]?"":v}
 function jget(u){return fetch(u).then(function(r){return r.json()})}
 function nrm(s){return String(s).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim()}
@@ -282,13 +282,17 @@ function render(){
  if(cp)cp.onclick=function(){var t=curCity()+", retirada "+fdateY(S.ini)+", devolução "+fdateY(S.fim),m=document.getElementById("cpm");(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){m.textContent="Copiado."}).catch(function(){m.textContent=t})};
  var ct=document.getElementById("ct");
  if(ct)ct.onchange=function(){cur=+ct.value;render()};
- var rb=document.getElementById("rb");
+ var rb=document.getElementById("rb"),rr=document.getElementById("rr"),rn=document.getElementById("rn");
+ if(rr)rr.oninput=function(){document.getElementById("rrv").textContent=rr.value+" km"};
+ if(rn)rn.onkeydown=function(ev){if(ev.key==="Enter"){ev.preventDefault();rb.click()}};
  if(rb)rb.onclick=function(){
-  var m=document.getElementById("rm"),l=document.getElementById("rl");
+  var m=document.getElementById("rm"),l=document.getElementById("rl"),nome=document.getElementById("rn").value.trim();
   m.textContent="Buscando...";l.innerHTML="";
-  jget("/api/restaurants?city="+q(curCity())+"&r="+document.getElementById("rr").value+"&cat="+q(document.getElementById("rc").value)).then(function(r){
+  jget("/api/restaurants?city="+q(curCity())+"&r="+(+document.getElementById("rr").value*1000)+"&cat="+q(document.getElementById("rc").value)+"&nome="+q(nome)).then(function(r){
    if(!Array.isArray(r)){m.textContent=r.erro||"Não foi possível buscar agora.";return}
-   m.textContent=r.length?r.length+" resultados. Toque em Usar para preencher o formulário.":"Nada encontrado. Tente outra categoria ou um raio maior.";
+   if(r.length)m.textContent=r.length+" resultados. Toque em Usar para preencher o formulário.";
+   else if(nome)m.innerHTML="Nenhum local com esse nome no raio escolhido. Tente parte do nome, aumente o raio ou <a target=\"_blank\" rel=\"noopener noreferrer\" style=\"color:var(--acc)\" href=\"https://www.google.com/maps/search/"+q(nome+" "+curCity())+"\">procure no Google Maps</a> e preencha à mão.";
+   else m.textContent="Nada encontrado. Tente outra categoria ou um raio maior.";
    l.innerHTML=r.map(function(x,k){return '<div class="item"><div><div class="n">'+esc(x.nome)+'</div><div class="m">'+esc([x.tipo,x.coz,x.dist+" m",x.end].filter(Boolean).join(" · "))+'</div><div class="m">'+restLinks(x)+'</div></div><button class="ghost" data-use="'+k+'">Usar</button></div>'}).join("");
    Array.prototype.forEach.call(l.querySelectorAll("[data-use]"),function(b){b.onclick=function(){usarRest(r[+b.dataset.use])}});
   }).catch(function(){m.textContent="Falha ao buscar. Tente de novo."});

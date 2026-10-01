@@ -138,16 +138,69 @@ async function clima(cidade, ini, fim) {
 const COZ = { brazilian: "Brasileira", regional: "Regional", italian: "Italiana", pizza: "Pizza", burger: "Hambúrguer", steak_house: "Carnes", barbecue: "Churrasco", japanese: "Japonesa", sushi: "Sushi", german: "Alemã", fondue: "Fondue", chinese: "Chinesa", french: "Francesa", mexican: "Mexicana", seafood: "Frutos do mar", fish: "Peixes", coffee_shop: "Café", vegetarian: "Vegetariana", vegan: "Vegana", international: "Internacional", portuguese: "Portuguesa", spanish: "Espanhola", arab: "Árabe", lebanese: "Libanesa", sandwich: "Sanduíches", ice_cream: "Sorvetes", chocolate: "Chocolate", bakery: "Padaria", pasta: "Massas", thai: "Tailandesa", indian: "Indiana", peruvian: "Peruana", argentinian: "Argentina" };
 const TIPO = { restaurant: ["restaurant", "Restaurante"], cafe: ["cafe", "Café"], bar: ["bar", "Bar"], pub: ["bar", "Pub"] };
 const hav = (a, b, c, d) => { const r = x => x * Math.PI / 180, h = Math.sin(r(c - a) / 2) ** 2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(r(d - b) / 2) ** 2; return 12742000 * Math.asin(Math.sqrt(h)); };
+// ---------- Horário, faixa de preço e nota a partir do site (schema.org / JSON-LD) ----------
+const PTDIA = { Mo: "Seg", Tu: "Ter", We: "Qua", Th: "Qui", Fr: "Sex", Sa: "Sáb", Su: "Dom", PH: "feriados", off: "fechado" };
+const ptHoras = t => String(t || "").replace(/24\/7/g, "24 horas").replace(/\b(Mo|Tu|We|Th|Fr|Sa|Su|PH|off)\b/g, m => PTDIA[m]);
+const DIAS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"], DEN = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+const runs = idx => { idx = [...new Set(idx)].sort((a, b) => a - b); const o = []; for (let i = 0; i < idx.length;) { let j = i; while (j + 1 < idx.length && idx[j + 1] === idx[j] + 1) j++; o.push(j - i >= 2 ? DIAS[idx[i]] + "-" + DIAS[idx[j]] : idx.slice(i, j + 1).map(k => DIAS[k]).join(", ")); i = j + 1; } return o.join(", "); };
+const hm = t => String(t || "").slice(0, 5);
+function horasLd(o) {
+  const spec = [].concat(o.openingHoursSpecification || []);
+  if (spec.length) {
+    const g = new Map();
+    for (const sp of spec) {
+      if (!sp || !sp.opens || !sp.closes) continue;
+      const ds = [].concat(sp.dayOfWeek || []).map(d => DEN.indexOf(String(d).split("/").pop().toLowerCase())).filter(i => i >= 0);
+      const key = hm(sp.opens) + "-" + hm(sp.closes); g.set(key, (g.get(key) || []).concat(ds));
+    }
+    const t = [...g].map(([k, ds]) => (runs(ds) + " " + k).trim()).join("; ");
+    if (t) return t;
+  }
+  return ptHoras([].concat(o.openingHours || []).join("; "));
+}
+function faixaDe(p) {
+  p = String(p || "").replace(/R\$/gi, "").trim(); if (!p) return "";
+  const nums = (p.match(/\d+(?:[.,]\d+)?/g) || []).map(n => Number(n.replace(",", ".")));
+  if (nums.length) { const m = nums.reduce((a, b) => a + b, 0) / nums.length; return m <= 40 ? "$" : m <= 80 ? "$$" : m <= 150 ? "$$$" : "$$$$"; }
+  const c = (p.match(/\$/g) || []).length; return c ? "$".repeat(Math.min(c, 4)) : "";
+}
+function walkLd(n, out) { if (Array.isArray(n)) return n.forEach(x => walkLd(x, out)); if (n && typeof n === "object") { out.push(n); Object.values(n).forEach(v => { if (v && typeof v === "object") walkLd(v, out); }); } }
+async function restInfo(urls) {
+  const k = "i:" + urls.join("|"); if (cache.has(k)) return cache.get(k);
+  const out = { faixa: "", horario: "", avaliacao: "", fonte: "" };
+  for (const raw of urls) {
+    if (out.faixa && out.horario && out.avaliacao) break;
+    try {
+      const href = await safeUrl(raw), r = await get(href);
+      if (!r.ok || !(r.headers.get("content-type") || "").includes("text/html")) continue;
+      const html = (await r.text()).slice(0, 2e6), nodes = []; let got = false;
+      for (const m of html.matchAll(/<script[^>]+ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) { try { walkLd(JSON.parse(m[1]), nodes); } catch {} }
+      for (const o of nodes) {
+        if (!out.faixa && o.priceRange) { out.faixa = faixaDe(o.priceRange); got = got || !!out.faixa; }
+        if (!out.horario && (o.openingHoursSpecification || o.openingHours)) { out.horario = horasLd(o); got = got || !!out.horario; }
+        const rv = o.aggregateRating && Number(String(o.aggregateRating.ratingValue).replace(",", "."));
+        if (!out.avaliacao && rv > 0 && rv <= 5) { out.avaliacao = String(rv); got = true; }
+      }
+      if (got && !out.fonte) out.fonte = new URL(href).hostname;
+    } catch {}
+  }
+  if (out.fonte) cache.set(k, out);
+  return out;
+}
 const CATKEYS = { "Pizza":"pizza","Hambúrguer":"burger","Carnes e churrasco":"steak_house|barbecue","Italiana":"italian|pasta","Massas":"pasta","Japonesa":"japanese|sushi","Fondue":"fondue","Alemã":"german","Frutos do mar":"seafood|fish","Vegetariana":"vegetarian|vegan","Brasileira":"brazilian|regional" };
-async function restaurantes(cidade, raio, cat) {
-  raio = Math.min(Math.max(+raio || 4000, 1000), 15000);
-  const k = `r:${cidade}:${raio}:${cat || ""}`; if (cache.has(k)) return cache.get(k);
+const ACC = { a: "[aàáâãä]", e: "[eéèêë]", i: "[iíìîï]", o: "[oóòôõö]", u: "[uúùûü]", c: "[cç]", n: "[nñ]" };
+// Nome digitado -> padrão que ignora maiúsculas e acentos (só letras, números, espaço, ' e -)
+const nomeRe = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9 '-]/g, "").trim().slice(0, 60).replace(/[aeioucn]/g, ch => ACC[ch]);
+async function restaurantes(cidade, raio, cat, nome) {
+  raio = Math.min(Math.max(+raio || 4000, 1000), 16000);
+  const nre = nomeRe(nome);
+  const k = `r:${cidade}:${raio}:${cat || ""}:${nre}`; if (cache.has(k)) return cache.get(k);
   const c = (await places(cidade))[0]; if (!c) return [];
   let filtro = '["amenity"~"^(restaurant|cafe|bar|pub)$"]';
   if (cat === "Café") filtro = '["amenity"="cafe"]';
   else if (cat === "Bar") filtro = '["amenity"~"^(bar|pub)$"]';
   else if (CATKEYS[cat]) filtro += `["cuisine"~"${CATKEYS[cat]}"]`;
-  const qy = `[out:json][timeout:25];nwr${filtro}["name"](around:${raio},${c.lat},${c.lon});out center 400;`;
+  const qy = `[out:json][timeout:25];nwr${filtro}${nre ? `["name"~"${nre}",i]` : '["name"]'}(around:${raio},${c.lat},${c.lon});out center ${raio > 8000 ? 800 : 400};`;
   const r = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded" }, body: "data=" + encodeURIComponent(qy), signal: AbortSignal.timeout(30000) });
   if (!r.ok) throw new Error("O serviço de mapas está ocupado. Tente de novo em instantes.");
   const j = await r.json();
@@ -161,7 +214,7 @@ async function restaurantes(cidade, raio, cat) {
     const ig = g["contact:instagram"] || g.instagram || "";
     const insta = ig ? (/^https?:/.test(ig) ? ig : "https://instagram.com/" + ig.replace(/^@/, "")) : "";
     const maps = "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent([g.name, g["addr:street"], cidade].filter(Boolean).join(" "));
-    return { nome: g.name, t, tipo, coz, end, site, insta, maps, horario: g.opening_hours || "", tel: g.phone || g["contact:phone"] || "", dist: Math.round(hav(c.lat, c.lon, lat, lon)), score };
+    return { nome: g.name, t, tipo, coz, end, site, insta, maps, horario: ptHoras(g.opening_hours || ""), tel: g.phone || g["contact:phone"] || "", dist: Math.round(hav(c.lat, c.lon, lat, lon)), score };
   }).filter(Boolean);
   const uniq = [...new Map(out.map(o => [o.nome.toLowerCase() + o.end, o])).values()].sort((a, b) => b.score - a.score || a.dist - b.dist).slice(0, 60).map(({ score, ...o }) => o);
   cache.set(k, uniq); return uniq;
@@ -211,8 +264,9 @@ const server = http.createServer(async (req, res) => {
     });
   }
 }
+    if (p === "/api/restinfo") { const l = ["site", "insta"].map(k => u.searchParams.get(k) || "").filter(x => /^https?:\/\//i.test(x)); return send(res, 200, l.length ? await restInfo(l) : { faixa: "", horario: "", avaliacao: "", fonte: "" }); }
     if (p === "/api/foto") { const f = new URL(u.searchParams.get("url") || ""); if (f.hostname !== "storage.googleapis.com" || !f.pathname.startsWith("/movida-public-images/")) return send(res, 400, { erro: "origem não permitida" }); return send(res, 200, { foto: await baixarFoto(f.href) }); }
-    if (p === "/api/restaurants") { const c = (u.searchParams.get("city") || "").trim(); if (c.length < 3) return send(res, 400, { erro: "Cidade não informada" }); try { return send(res, 200, await restaurantes(c, u.searchParams.get("r"), u.searchParams.get("cat"))); } catch (e) { return send(res, 502, { erro: e.message || "Não foi possível buscar restaurantes agora." }); } }
+    if (p === "/api/restaurants") { const c = (u.searchParams.get("city") || "").trim(); if (c.length < 3) return send(res, 400, { erro: "Cidade não informada" }); try { return send(res, 200, await restaurantes(c, u.searchParams.get("r"), u.searchParams.get("cat"), u.searchParams.get("nome"))); } catch (e) { return send(res, 502, { erro: e.message || "Não foi possível buscar restaurantes agora." }); } }
     if (p === "/api/places") { const q = (u.searchParams.get("q") || "").trim(); return send(res, 200, q.length < 3 ? [] : await places(q)); }
     if (p === "/api/weather") { const c = (u.searchParams.get("cities") || "").split("|").filter(Boolean), out = {}; for (const x of c) out[x] = await clima(x, u.searchParams.get("ini"), u.searchParams.get("fim")).catch(() => []); return send(res, 200, out); }
     if (p === "/api/calendar.ics") { const all = loadAll(), id = u.searchParams.get("id"); if (!okId(id) || !all[id]) return send(res, 404, { erro: "viagem não encontrada" }); return send(res, 200, ics(all[id]), "text/calendar; charset=utf-8", { "Content-Disposition": 'attachment; filename="viagem.ics"' }); }
@@ -221,4 +275,4 @@ const server = http.createServer(async (req, res) => {
   } catch (e) { send(res, 500, { erro: e.message }); }
 });
 if (require.main === module) server.listen(PORT, () => console.log("Planejador rodando em http://localhost:" + PORT));
-module.exports = { parseHtml };
+module.exports = { parseHtml, faixaDe, horasLd, ptHoras };
