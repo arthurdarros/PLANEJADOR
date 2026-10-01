@@ -92,29 +92,53 @@ function comerBusca(){
  return '<div class="panel" style="background:var(--bg);margin-bottom:12px"><b>Buscar restaurantes na região</b><label for="rn">Nome do restaurante (opcional)</label><input id="rn" placeholder="Ex.: Pizzaria do Zé" autocomplete="off"><div class="row"><div><label for="rc">Categoria</label><select id="rc"><option value="">Todas</option>'+CATR.map(function(c){return "<option>"+c+"</option>"}).join("")+'</select></div><div><label for="rr">Raio: <b id="rrv">4 km</b></label><input id="rr" type="range" min="1" max="16" step="1" value="4" style="padding:0;height:40px;accent-color:var(--acc)"></div></div><div style="margin-top:10px"><button class="ghost" id="rb" type="button">Buscar em '+esc(curCity())+'</button></div><p id="rm" class="m" style="color:var(--mute);font-size:14px;margin:8px 0 0"></p><div id="rl"></div></div>';
 }
 function comerFields(){
- return '<div class="row"><div><label for="cg">Categoria</label><input id="cg" list="cgl" placeholder="Pizza, Hambúrguer..."><datalist id="cgl">'+CATR.map(function(c){return '<option value="'+c+'">'}).join("")+'</datalist></div><div><label for="fp">Faixa de preço</label><select id="fp"><option value="">Não informada</option><option value="$">$ · econômico</option><option value="$$">$$ · moderado</option><option value="$$$">$$$ · caro</option><option value="$$$$">$$$$ · sofisticado</option></select></div><div><label for="av">Nota (0 a 5)</label><input id="av" type="number" min="0" max="5" step="0.1" inputmode="decimal"></div></div><label for="hr">Horário de funcionamento</label><input id="hr" placeholder="Ex.: Seg-Sex 11h-23h">';
+ return '<div class="row"><div><label for="cg">Categoria</label><input id="cg" list="cgl" placeholder="Pizza, Hambúrguer..."><datalist id="cgl">'+CATR.map(function(c){return '<option value="'+c+'">'}).join("")+'</datalist></div><div><label for="fp">Faixa de preço</label><select id="fp"><option value="">Não informada</option><option value="$">$ · econômico</option><option value="$$">$$ · moderado</option><option value="$$$">$$$ · caro</option><option value="$$$$">$$$$ · sofisticado</option></select></div><div><label for="av">Nota (0 a 5)</label><input id="av" type="number" min="0" max="5" step="0.1" inputmode="decimal"></div></div><label for="hr">Horário de funcionamento</label><input id="hr" placeholder="Ex.: Seg-Sex 11h-23h"><div class="row"><div><label for="st">Site</label><input id="st" placeholder="https://..."></div><div><label for="ig">Instagram</label><input id="ig" placeholder="https://instagram.com/..."></div><div><label for="ex">Outra página (Tripadvisor, blog)</label><input id="ex" placeholder="https://..."></div></div><div style="margin-top:10px"><button class="ghost" id="rf" type="button">Buscar dados nos links</button></div><p id="rs" class="m" style="color:var(--mute);font-size:14px;margin:8px 0 0"></p><img id="rfi" alt="" hidden style="width:140px;height:auto;max-height:100px;object-fit:cover;border-radius:8px;margin-top:8px">';
 }
 function restLinks(x){var L=[["Maps",x.maps],["Site",x.site],["Instagram",x.insta]];return L.filter(function(a){return a[1]}).map(function(a){return '<a target="_blank" rel="noopener noreferrer" href="'+esc(a[1])+'">'+a[0]+'</a>'}).join(" · ")}
 var restTok=0;
 function usarRest(x){
- var g=function(i){return document.getElementById(i)},tok=++restTok,er=g("e");
- ["fp","av","hr","nt","lk"].forEach(function(i){if(g(i))g(i).value=""});
+ var g=function(i){return document.getElementById(i)},tok=++restTok;
+ ["fp","av","hr","nt","lk","st","ig","ex"].forEach(function(i){if(g(i))g(i).value=""});
+ window.autoFoto="";if(g("rfi"))g("rfi").hidden=true;
  var set=function(i,v){if(g(i)&&v)g(i).value=v};
- set("nm",x.nome);set("cg",x.coz||x.tipo);set("hr",x.horario);set("lk",x.maps);
- set("nt",[x.end,x.tel&&"Tel: "+x.tel,x.site&&"Site: "+x.site,x.insta&&"Instagram: "+x.insta].filter(Boolean).join(" · "));
- var base="Preenchido pelo mapa. ",fim="Faixa de preço e nota não vêm do mapa: confira no link e preencha.";
+ set("nm",x.nome);set("cg",x.coz||x.tipo);set("hr",x.horario);set("lk",x.maps);set("st",x.site);set("ig",x.insta);
+ set("nt",[x.end,x.tel&&"Tel: "+x.tel].filter(Boolean).join(" · "));
  g("nm").scrollIntoView({behavior:"smooth",block:"center"});
- if(!x.site&&!x.insta){er.textContent=base+fim;return}
- er.textContent=base+"Buscando faixa de preço e horário no site...";
- jget("/api/restinfo?site="+q(x.site||"")+"&insta="+q(x.insta||"")).then(function(d){
-  if(tok!==restTok||!g("fp"))return;
-  var got=[];
-  if(d.faixa){g("fp").value=d.faixa;got.push("faixa de preço")}
-  if(d.horario){g("hr").value=d.horario;got.push("horário")}
-  if(d.avaliacao){g("av").value=d.avaliacao;got.push("nota")}
-  er.textContent=got.length?base+"Do site ("+d.fonte+"): "+got.join(", ")+". Confira antes de salvar.":base+"O site não informou preço nem horário. "+fim;
- }).catch(function(){if(tok===restTok&&g("e"))g("e").textContent=base+fim});
+ enriquecer(tok,"Preenchido pelo mapa. ");
 }
+function enriquecer(tok,base){
+ var g=function(i){return document.getElementById(i)},rs=g("rs");
+ if(!rs)return;
+ if(tok===undefined)tok=++restTok;
+ base=base||"";
+ var nome=g("nm").value.trim();
+ function vivo(){return tok===restTok&&g("rs")}
+ function dados(chk){
+  rs.textContent=base+"Lendo horário, preço, nota e foto nas páginas...";
+  jget("/api/restinfo?site="+q(g("st").value.trim())+"&insta="+q(g("ig").value.trim())+"&extra="+q(g("ex").value.trim())+"&nome="+q(nome)+"&chk="+(chk?1:0)).then(function(d){
+   if(!vivo())return;
+   var got=[];
+   function pre(i,v,l){var e=g(i);if(e&&v&&!e.value.trim()){e.value=v;got.push(l)}}
+   pre("fp",d.faixa,"faixa de preço");pre("hr",d.horario,"horário");pre("av",d.avaliacao,"nota");pre("cg",d.categoria,"categoria");
+   var nt=g("nt");if(nt&&d.precoTxt&&nt.value.indexOf(d.precoTxt)<0){nt.value+=(nt.value?" · ":"")+"Preço no site: "+d.precoTxt;got.push("preço (na observação)")}
+   if(d.foto&&!window.autoFoto){window.autoFoto=d.foto;var im=g("rfi");if(im){im.src=d.foto;im.hidden=false}got.push("foto")}
+   rs.textContent=got.length?base+"Encontrado ("+d.fonte+"): "+got.join(", ")+". Confira antes de salvar.":base+"Não consegui ler dados nessas páginas (muitos sites e o Instagram bloqueiam a leitura). Cole outro link nos campos acima ou preencha à mão.";
+  }).catch(function(){if(vivo())rs.textContent=base+"Falha ao ler as páginas. Tente de novo ou preencha à mão."});
+ }
+ if(g("st").value.trim()||g("ig").value.trim()||g("ex").value.trim())return dados(false);
+ if(!nome){rs.textContent="Digite o nome do restaurante primeiro.";return}
+ rs.textContent=base+"Procurando site e Instagram na internet...";
+ jget("/api/descobrir?nome="+q(nome)+"&cidade="+q(curCity())).then(function(d){
+  if(!vivo())return;
+  var ach=[];
+  function pl(i,v,l){var e=g(i);if(e&&v&&!e.value.trim()){e.value=v;ach.push(l)}}
+  pl("st",d.site,"site");pl("ig",d.insta,"Instagram");pl("ex",d.extra,"outra página");
+  if(!ach.length){rs.textContent=base+"Não encontrei site nem Instagram deste local. Cole os links nos campos acima e toque em Buscar dados nos links.";return}
+  base+="Achei: "+ach.join(", ")+". ";
+  dados(true);
+ }).catch(function(){if(vivo())rs.textContent=base+"Não consegui pesquisar agora. Cole os links nos campos acima e toque em Buscar dados nos links."});
+}
+function itemLinks(it){return [["Site",it.site],["Instagram",it.insta],["Página",it.extra]].filter(function(a){return a[1]}).map(function(a){return ' · <a target="_blank" rel="noopener noreferrer" href="'+esc(a[1])+'">'+a[0]+'</a>'}).join("")}
 function nomeField(){
  if(tab!=="carro")return '<label for="nm">Nome</label><input id="nm">';
  return '<label for="lc">Locadora</label><select id="lc"><option>Movida</option><option>Localiza</option><option>Rentcars</option><option>Outra</option></select>'+
@@ -162,7 +186,7 @@ function diarias(a,b){var n=ndays(a,b);return n+(n===1?" diária":" diárias")}
 function fdateY(s){var p=s.split("-");return p[2]+"/"+p[1]+"/"+p[0]}
 function itemHtml(it,pick){
  var meta=[it.cidade,it.nota,it.categoria,it.faixa,it.avaliacao?"★ "+it.avaliacao:"",it.horario?"Horário: "+it.horario:"",it.diaria?money(it.diaria)+(it.cat==="hosp"?"/noite":"/dia"):"",it.dia?(it.fim?fdate(it.dia)+" a "+fdate(it.fim)+" ("+(it.cat==="carro"?diarias(it.dia,it.fim):nights(it.dia,it.fim))+")":fdate(it.dia)):"",it.hin?"check-in a partir das "+it.hin:"",it.hout?"check-out até "+it.hout:"",it.ret?(it.dev&&it.dev!==it.ret?"retirada: "+it.ret+" → devolução: "+it.dev:"retirada e devolução: "+it.ret):""].filter(Boolean).join(" · ");
- return '<div class="item"><div class="l">'+(it.foto?'<img class="th" alt="" src="'+it.foto+'">':'')+'<div><div class="n">'+esc(it.nome)+(pick===true&&it.escolhida?' <span class="ok">Escolhida</span>':'')+'</div><div class="m">'+esc(meta)+" "+(it.link?' <a target="_blank" rel="noopener noreferrer" href="'+esc(it.link)+'">abrir link</a>':"")+'</div></div></div><div><div class="p">'+(it.preco?money(it.preco):"")+'</div>'+(pick===true?'<button class="ghost" style="padding:4px 10px;font-size:14px" data-pick="'+it.id+'">'+(it.escolhida?'Desmarcar':'Escolher')+'</button><br>':'')+'<button class="x" data-del="'+it.id+'">Remover</button></div></div>';
+ return '<div class="item"><div class="l">'+(it.foto?'<img class="th" alt="" src="'+it.foto+'">':'')+'<div><div class="n">'+esc(it.nome)+(pick===true&&it.escolhida?' <span class="ok">Escolhida</span>':'')+'</div><div class="m">'+esc(meta)+" "+(it.link?' <a target="_blank" rel="noopener noreferrer" href="'+esc(it.link)+'">abrir link</a>':"")+itemLinks(it)+'</div></div></div><div><div class="p">'+(it.preco?money(it.preco):"")+'</div>'+(pick===true?'<button class="ghost" style="padding:4px 10px;font-size:14px" data-pick="'+it.id+'">'+(it.escolhida?'Desmarcar':'Escolher')+'</button><br>':'')+'<button class="x" data-del="'+it.id+'">Remover</button></div></div>';
 }
 function openTrip(id){jget("/api/trips/"+q(id)).then(function(t){S=prep(t);TID=id;tab="hosp";cur=0;editing=false;pend=[];view="trip";render()}).catch(function(){})}
 function newTrip(){S={dest:"",ini:"",fim:"",items:[],cities:[]};TID=String(Date.now());tab="hosp";cur=0;pend=[];editing=true;view="trip";render()}
@@ -282,7 +306,8 @@ function render(){
  if(cp)cp.onclick=function(){var t=curCity()+", retirada "+fdateY(S.ini)+", devolução "+fdateY(S.fim),m=document.getElementById("cpm");(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){m.textContent="Copiado."}).catch(function(){m.textContent=t})};
  var ct=document.getElementById("ct");
  if(ct)ct.onchange=function(){cur=+ct.value;render()};
- var rb=document.getElementById("rb"),rr=document.getElementById("rr"),rn=document.getElementById("rn");
+ var rb=document.getElementById("rb"),rr=document.getElementById("rr"),rn=document.getElementById("rn"),rf=document.getElementById("rf");
+ if(rf)rf.onclick=function(){enriquecer(undefined,"")};
  if(rr)rr.oninput=function(){document.getElementById("rrv").textContent=rr.value+" km"};
  if(rn)rn.onkeydown=function(ev){if(ev.key==="Enter"){ev.preventDefault();rb.click()}};
  if(rb)rb.onclick=function(){
@@ -309,7 +334,7 @@ function render(){
   if(mvE&&!ret){document.getElementById("e").textContent="Escolha a loja de retirada.";return}
   if(ret&&!dev)dev=ret;
   var ftE=document.getElementById("ft"),fl=ftE?ftE.files[0]:null;
-  var fin=function(foto){S.items.push({id:Date.now(),foto:foto||"",cat:tab,escolhida:false,cidade:cidadeItem(),nome:nm,preco:document.getElementById("pr").value,dia:(document.getElementById("dy")||document.getElementById("ci")).value,fim:(tab==="carro"||tab==="hosp")?document.getElementById("co").value:"",diaria:(tab==="carro"||tab==="hosp")?document.getElementById("dr").value:"",ret:ret,dev:dev,hin:tab==="hosp"?document.getElementById("hi").value:"",hout:tab==="hosp"?document.getElementById("ho").value:"",link:document.getElementById("lk")?safeUrl(document.getElementById("lk").value):"",nota:document.getElementById("nt").value.trim(),categoria:gv("cg"),faixa:gv("fp"),avaliacao:gv("av"),horario:gv("hr")});save();render()};
+  var fin=function(foto){S.items.push({id:Date.now(),foto:foto||"",cat:tab,escolhida:false,cidade:cidadeItem(),nome:nm,preco:document.getElementById("pr").value,dia:(document.getElementById("dy")||document.getElementById("ci")).value,fim:(tab==="carro"||tab==="hosp")?document.getElementById("co").value:"",diaria:(tab==="carro"||tab==="hosp")?document.getElementById("dr").value:"",ret:ret,dev:dev,hin:tab==="hosp"?document.getElementById("hi").value:"",hout:tab==="hosp"?document.getElementById("ho").value:"",link:document.getElementById("lk")?safeUrl(document.getElementById("lk").value):"",nota:document.getElementById("nt").value.trim(),categoria:gv("cg"),faixa:gv("fp"),avaliacao:gv("av"),horario:gv("hr"),site:safeUrl(gv("st")),insta:safeUrl(gv("ig")),extra:safeUrl(gv("ex"))});save();render()};
   if(fl)shrink(fl,fin);else fin(window.autoFoto||"");};
  var lk=document.getElementById("lk");
  var fill=function(loud){

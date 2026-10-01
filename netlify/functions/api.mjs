@@ -147,25 +147,119 @@ function faixaDe(p) {
   const c = (p.match(/\$/g) || []).length; return c ? "$".repeat(Math.min(c, 4)) : "";
 }
 function walkLd(n, out) { if (Array.isArray(n)) return n.forEach(x => walkLd(x, out)); if (n && typeof n === "object") { out.push(n); Object.values(n).forEach(v => { if (v && typeof v === "object") walkLd(v, out); }); } }
-async function restInfo(urls) {
-  const k = "i:" + urls.join("|"); if (cache.has(k)) return cache.get(k);
-  const out = { faixa: "", horario: "", avaliacao: "", fonte: "" };
-  for (const raw of urls) {
-    if (out.faixa && out.horario && out.avaliacao) break;
-    try {
-      const href = await safeUrl(raw), r = await get(href);
-      if (!r.ok || !(r.headers.get("content-type") || "").includes("text/html")) continue;
-      const html = (await r.text()).slice(0, 2e6), nodes = []; let got = false;
-      for (const m of html.matchAll(/<script[^>]+ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) { try { walkLd(JSON.parse(m[1]), nodes); } catch {} }
-      for (const o of nodes) {
-        if (!out.faixa && o.priceRange) { out.faixa = faixaDe(o.priceRange); got = got || !!out.faixa; }
-        if (!out.horario && (o.openingHoursSpecification || o.openingHours)) { out.horario = horasLd(o); got = got || !!out.horario; }
-        const rv = o.aggregateRating && Number(String(o.aggregateRating.ratingValue).replace(",", "."));
-        if (!out.avaliacao && rv > 0 && rv <= 5) { out.avaliacao = String(rv); got = true; }
-      }
-      if (got && !out.fonte) out.fonte = new URL(href).hostname;
-    } catch {}
+// ---------- Descoberta de links (site, Instagram, Tripadvisor...) e leitura de páginas do restaurante ----------
+const semAcento = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const GENERICAS = /\b(pizzaria|restaurante|restaurant|bar|cafe|cafeteria|churrascaria|hamburgueria|lanchonete|bistro|trattoria|cantina|padaria|confeitaria|sorveteria|e)\b/g;
+const slugNome = n => semAcento(n).replace(GENERICAS, " ").replace(/[^a-z0-9]/g, "");
+const soAlfa = s => semAcento(s).replace(/[^a-z0-9]/g, "");
+const nomeNoTexto = (txt, nome) => { const sl = slugNome(nome); return !sl || soAlfa(txt).includes(sl); };
+const BUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+const getMs = (u, ms) => fetch(u, { headers: { "User-Agent": BUA, "Accept-Language": "pt-BR,pt;q=0.9", "Accept": "text/html,application/xhtml+xml" }, signal: AbortSignal.timeout(ms), redirect: "follow" });
+
+function parseDDG(html) {
+  const out = [];
+  for (const m of html.matchAll(/<a\b[^>]*class="[^"]*result__a[^"]*"[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const h = (m[0].match(/href="([^"]+)"/) || [])[1]; if (!h) continue;
+    let u = decode(h); const e = u.match(/[?&]uddg=([^&]+)/);
+    if (e) { try { u = decodeURIComponent(e[1]); } catch {} }
+    if (u.startsWith("//")) u = "https:" + u;
+    if (/^https?:\/\//i.test(u) && !/duckduckgo\.com/.test(u)) out.push({ url: u, titulo: decode(m[1].replace(/<[^>]+>/g, "")).trim() });
   }
+  return out;
+}
+function parseBing(html) {
+  const out = [];
+  for (const m of html.matchAll(/<li[^>]+class="b_algo"[\s\S]*?<h2[^>]*>\s*<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
+    let u = decode(m[1]); const b = u.match(/[?&]u=a1([^&]+)/);
+    if (b) { try { u = Buffer.from(b[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"); } catch {} }
+    if (/^https?:\/\//i.test(u) && !/bing\.com/.test(u)) out.push({ url: u, titulo: decode(m[2].replace(/<[^>]+>/g, "")).trim() });
+  }
+  return out;
+}
+async function buscaWeb(q) {
+  const k = "b:" + q; if (cache.has(k)) return cache.get(k);
+  let r = [];
+  try { const x = await getMs("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(q), 6000); if (x.ok) r = parseDDG(await x.text()); } catch {}
+  if (!r.length) { try { const x = await getMs("https://www.bing.com/search?setlang=pt-BR&q=" + encodeURIComponent(q), 6000); if (x.ok) r = parseBing(await x.text()); } catch {} }
+  if (r.length) cache.set(k, r);
+  return r;
+}
+const AGREG = /(^|\.)(google|facebook|instagram|tripadvisor|ifood|yelp|youtube|tiktok|twitter|x|pinterest|booking|airbnb|waze|foursquare|restaurantguru|wikipedia|linkedin|olx|mercadolivre|reclameaqui|cardapioweb|menudino|rappi|ubereats|kekanto|guiamais|apontador|telelistas)\.[a-z.]+$/;
+function classifica(url, nome) {
+  let u; try { u = new URL(url); } catch { return null; }
+  const host = u.hostname.toLowerCase().replace(/^www\./, "");
+  if (/(^|\.)instagram\.com$/.test(host)) { const seg = u.pathname.split("/").filter(Boolean)[0]; return seg && !/^(p|reel|reels|explore|accounts|stories|tv|directory|popular|about|legal)$/i.test(seg) ? { tipo: "insta", url: "https://www.instagram.com/" + seg + "/" } : null; }
+  if (/(^|\.)tripadvisor\./.test(host)) return /Restaurant_Review/.test(u.pathname) ? { tipo: "ta", url } : null;
+  if (AGREG.test(host)) return null;
+  const sl = slugNome(nome), hs = host.replace(/[^a-z0-9]/g, "");
+  return { tipo: sl.length >= 4 && hs.includes(sl) ? "site" : "outro", url };
+}
+async function descobrir(nome, cidade) {
+  const k = `d:${nome}:${cidade}`; if (cache.has(k)) return cache.get(k);
+  const cid = String(cidade || "").split(",")[0].trim();
+  const [a, b] = await Promise.all([buscaWeb(`"${nome}" ${cid}`), buscaWeb(`${nome} ${cid} instagram tripadvisor`)]);
+  const out = { site: "", insta: "", extra: "", ta: "", outros: [] }, sl = slugNome(nome), vistos = new Set();
+  for (const r of [...a, ...b]) {
+    const c = classifica(r.url, nome); if (!c || vistos.has(c.url)) continue; vistos.add(c.url);
+    const ok = !sl || soAlfa(r.titulo + " " + c.url).includes(sl);
+    if (c.tipo === "site" && !out.site) out.site = c.url;
+    else if (c.tipo === "insta" && ok && !out.insta) out.insta = c.url;
+    else if (c.tipo === "ta" && ok && !out.ta) out.ta = c.url;
+    else if (c.tipo === "outro" && ok && out.outros.length < 3) out.outros.push({ url: c.url, titulo: r.titulo.slice(0, 90) });
+  }
+  out.extra = (out.outros[0] && out.outros[0].url) || out.ta;
+  if (out.site || out.insta || out.extra) cache.set(k, out);
+  return out;
+}
+
+const DIAW = "(?:segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo)(?:-feira|s)?";
+const DIAR = `${DIAW}(?:\\s*(?:a|à|às|até|e|-|–)\\s*${DIAW})?`;
+const RE_HORA = new RegExp(`((?:todos os dias|diariamente|de ${DIAR}|${DIAR})[^.\\n]{0,40}?\\d{1,2}\\s?(?:h|:\\d{2})\\d{0,2}[^.\\n]{0,20}?\\d{1,2}\\s?(?:h|:\\d{2})\\d{0,2})`, "i");
+const RE_PRECO = /(?:ticket m[ée]dio|pre[cç]o m[ée]dio|valor m[ée]dio|rod[ií]zio|por pessoa|a partir de)[^.|]{0,40}?R\$\s?\d[\d.,]*|R\$\s?\d[\d.,]*\s*(?:por pessoa|p\/\s?pessoa|\/\s?pessoa)/i;
+function notaTxt(t) {
+  const m = t.match(/\b([0-4][.,]\d|5[.,]0)\s*(?:\/\s*5|de\s*5)\b/i) || t.match(/(?:nota|avalia[çc][ãa]o|rating)[^\d]{0,15}([0-4][.,]\d|5[.,]0)\b/i);
+  return m ? String(Number(m[1].replace(",", "."))) : "";
+}
+function extractPage(html, href) {
+  const o = { faixa: "", horario: "", avaliacao: "", categoria: "", precoTxt: "", foto: "" }, nodes = [];
+  for (const m of html.matchAll(/<script[^>]+ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) { try { walkLd(JSON.parse(m[1]), nodes); } catch {} }
+  for (const n of nodes) {
+    if (!o.faixa && n.priceRange) o.faixa = faixaDe(n.priceRange);
+    if (!o.horario && (n.openingHoursSpecification || n.openingHours)) o.horario = horasLd(n);
+    const rv = n.aggregateRating && Number(String(n.aggregateRating.ratingValue).replace(",", "."));
+    if (!o.avaliacao && rv > 0 && rv <= 5) o.avaliacao = String(rv);
+    if (!o.categoria && n.servesCuisine) o.categoria = [].concat(n.servesCuisine).map(String).slice(0, 2).join(", ");
+    if (!o.foto && n.image) { const im = [].concat(n.image)[0], u = typeof im === "string" ? im : im && im.url; if (u) o.foto = u; }
+  }
+  const og = meta(html, "og:image") || meta(html, "twitter:image"); if (og) o.foto = og;
+  if (o.foto) { try { o.foto = new URL(o.foto, href).href; } catch { o.foto = ""; } }
+  const txt = decode(meta(html, "og:description") + " " + meta(html, "description") + " " + html.slice(0, 1.5e6).replace(/<(script|style|noscript)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ");
+  if (!o.horario) { const m = txt.match(RE_HORA); if (m) o.horario = m[1].trim().slice(0, 120); }
+  if (!o.avaliacao) o.avaliacao = notaTxt(txt);
+  if (!o.faixa || !o.precoTxt) { const m = txt.match(RE_PRECO); if (m) { if (!o.precoTxt) o.precoTxt = m[0].trim().slice(0, 80); if (!o.faixa) o.faixa = faixaDe((m[0].match(/R\$\s?\d[\d.,]*/g) || []).join(" ")); } }
+  o.txt = txt;
+  return o;
+}
+// urls em ordem de prioridade; chk=true exige que o nome do restaurante apareça na página (links descobertos pela busca)
+async function restInfo(urls, nome, chk) {
+  const k = "i:" + [nome, chk ? 1 : 0, ...urls].join("|"); if (cache.has(k)) return cache.get(k);
+  const pages = await Promise.all(urls.map(async raw => {
+    try {
+      const href = await safeUrl(raw), r = await getMs(href, 7000);
+      if (!r.ok || !(r.headers.get("content-type") || "").includes("text/html")) return null;
+      const o = extractPage((await r.text()).slice(0, 2e6), href);
+      if (chk && !nomeNoTexto(o.txt, nome)) return null;
+      o.host = new URL(href).hostname.replace(/^www\./, ""); return o;
+    } catch { return null; }
+  }));
+  const out = { faixa: "", horario: "", avaliacao: "", categoria: "", precoTxt: "", fotos: [], fonte: "" }, fontes = [];
+  for (const o of pages) {
+    if (!o) continue; let got = false;
+    for (const f of ["faixa", "horario", "avaliacao", "categoria", "precoTxt"]) if (!out[f] && o[f]) { out[f] = o[f]; got = true; }
+    if (o.foto) { out.fotos.push(o.foto); got = true; }
+    if (got) fontes.push(o.host);
+  }
+  out.fonte = [...new Set(fontes)].join(", ");
   if (out.fonte) cache.set(k, out);
   return out;
 }
@@ -259,7 +353,8 @@ export async function handler(event) {
       return json(200, { ok: true, importadas: ent.length });
     }
     if (p === "/api/preview") { const url = q.url || ""; if (!url) return json(400, { erro: "URL não informada" }); try { return json(200, await preview(S, url)); } catch (e) { return json(400, { erro: e.message || "Não foi possível processar o link" }); } }
-    if (p === "/api/restinfo") { const l = ["site", "insta"].map(k => q[k] || "").filter(x => /^https?:\/\//i.test(x)); return json(200, l.length ? await restInfo(l) : { faixa: "", horario: "", avaliacao: "", fonte: "" }); }
+    if (p === "/api/descobrir") { const n = (q.nome || "").trim(); if (n.length < 2) return json(400, { erro: "Nome não informado" }); return json(200, await descobrir(n, q.cidade || "").catch(() => ({ site: "", insta: "", extra: "", ta: "", outros: [] }))); }
+    if (p === "/api/restinfo") { const l = ["site", "extra", "insta"].map(k => q[k] || "").filter(x => /^https?:\/\//i.test(x)); const d = l.length ? { ...(await restInfo(l, q.nome || "", q.chk === "1")) } : { faixa: "", horario: "", avaliacao: "", categoria: "", precoTxt: "", fotos: [], fonte: "" }; d.foto = ""; for (const f of d.fotos) { try { d.foto = await baixarFoto(S, f); break; } catch {} } delete d.fotos; return json(200, d); }
     if (p === "/api/foto") { let f; try { f = new URL(q.url || ""); } catch { return json(400, { erro: "URL inválida" }); } if (f.hostname !== "storage.googleapis.com" || !f.pathname.startsWith("/movida-public-images/")) return json(400, { erro: "origem não permitida" }); return json(200, { foto: await baixarFoto(S, f.href) }); }
     if (p === "/api/restaurants") { const c = (q.city || "").trim(); if (c.length < 3) return json(400, { erro: "Cidade não informada" }); try { return json(200, await restaurantes(c, q.r, q.cat, q.nome)); } catch (e) { return json(502, { erro: e.message || "Não foi possível buscar restaurantes agora." }); } }
     if (p === "/api/places") { const t = (q.q || "").trim(); return json(200, t.length < 3 ? [] : await places(t)); }
