@@ -89,7 +89,39 @@ var MLOJ=[
 function lojaOpts(){var uf=(curCity().match(/,\s*([A-Za-z]{2})$/)||[])[1];uf=uf?uf.toUpperCase():"";var l=MLOJ.slice().sort(function(a,b){return(b[0]===uf)-(a[0]===uf)});return l.map(function(s){return '<optgroup label="'+s[1]+'">'+s[2].split("|").map(function(n){return "<option>"+esc(n)+"</option>"}).join("")+"</optgroup>"}).join("")}
 var CATR=["Pizza","Hambúrguer","Carnes e churrasco","Italiana","Massas","Japonesa","Fondue","Alemã","Frutos do mar","Vegetariana","Brasileira","Café","Bar"];
 function comerBusca(){
- return '<div class="panel" style="background:var(--bg);margin-bottom:12px"><b>Buscar restaurantes na região</b><label for="rn">Nome do restaurante (opcional)</label><input id="rn" placeholder="Ex.: Pizzaria do Zé" autocomplete="off"><div class="row"><div><label for="rc">Categoria</label><select id="rc"><option value="">Todas</option>'+CATR.map(function(c){return "<option>"+c+"</option>"}).join("")+'</select></div><div><label for="rr">Raio: <b id="rrv">4 km</b></label><input id="rr" type="range" min="1" max="16" step="1" value="4" style="padding:0;height:40px;accent-color:var(--acc)"></div></div><div style="margin-top:10px"><button class="ghost" id="rb" type="button">Buscar em '+esc(curCity())+'</button></div><p id="rm" class="m" style="color:var(--mute);font-size:14px;margin:8px 0 0"></p><div id="rl"></div></div>';
+ return '<div class="panel" style="background:var(--bg);margin-bottom:12px"><b>Buscar restaurantes na região</b>'+baseBox()+'<label for="rn">Nome do restaurante (opcional)</label><input id="rn" placeholder="Ex.: Pizzaria do Zé" autocomplete="off"><div class="row"><div><label for="rc">Categoria</label><select id="rc"><option value="">Todas</option>'+CATR.map(function(c){return "<option>"+c+"</option>"}).join("")+'</select></div><div><label for="rr">Raio: <b id="rrv">4 km</b></label><input id="rr" type="range" min="1" max="16" step="1" value="4" style="padding:0;height:40px;accent-color:var(--acc)"></div></div><div style="margin-top:10px"><button class="ghost" id="rb" type="button">Buscar a partir de '+esc(baseAtual()?baseAtual().nome:curCity())+'</button></div><p id="rm" class="m" style="color:var(--mute);font-size:14px;margin:8px 0 0"></p><div id="rl"></div></div>';
+}
+function bases(){return (S.bases||[]).filter(function(b){return b.cidade===curCity()})}
+function baseAtual(){var id=(S.baseSel||{})[curCity()];return bases().filter(function(b){return b.id===id})[0]||null}
+function baseOpts(){var c=baseAtual();return '<option value="">Centro de '+esc(curCity())+'</option>'+bases().map(function(b){return '<option value="'+b.id+'"'+(c&&c.id===b.id?' selected':'')+'>'+esc(b.nome)+'</option>'}).join("")}
+function fmtDist(m){return m<1000?m+" m":(m/1000).toFixed(1).replace(".",",")+" km"}
+function baseBox(){
+ return '<label for="rbs" style="margin-top:8px">Local de base da busca</label><select id="rbs">'+baseOpts()+'</select><details id="rbd" style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">Adicionar local de base</summary><p class="m" style="color:var(--mute);font-size:14px;margin:8px 0 0">Digite o endereço da hospedagem ou um ponto de referência, cole um link do Google Maps ou informe coordenadas (lat, lon).</p><input id="rba" placeholder="Ex.: Rua Coberta, 100 ou link do Maps" style="margin-top:8px"><div class="row" style="margin-top:8px"><button class="ghost" id="rbq" type="button">Procurar local</button><button class="ghost" id="rbg" type="button">Usar minha localização</button></div><p id="rbm" class="m" style="color:var(--mute);font-size:14px;margin:8px 0 0"></p><div id="rbl"></div></details><button class="ghost" id="rbx" type="button" style="margin-top:8px;padding:4px 10px;font-size:14px;display:'+(baseAtual()?'inline-block':'none')+'">Remover este local</button>';
+}
+function initBase(){
+ var g=function(i){return document.getElementById(i)},sel=g("rbs");if(!sel)return;
+ function refresh(){var b=baseAtual();sel.innerHTML=baseOpts();g("rbx").style.display=b?"inline-block":"none";g("rb").textContent="Buscar a partir de "+(b?b.nome:curCity())}
+ function addBase(x){var b={id:Date.now(),nome:x.nome,lat:x.lat,lon:x.lon,cidade:curCity()};(S.bases=S.bases||[]).push(b);(S.baseSel=S.baseSel||{})[curCity()]=b.id;save();g("rbl").innerHTML="";g("rbm").textContent="";g("rba").value="";g("rbd").open=false;refresh()}
+ sel.onchange=function(){(S.baseSel=S.baseSel||{})[curCity()]=sel.value?+sel.value:null;save();refresh()};
+ g("rbx").onclick=function(){var b=baseAtual();if(!b)return;S.bases=(S.bases||[]).filter(function(x){return x.id!==b.id});S.baseSel[curCity()]=null;save();refresh()};
+ g("rba").onkeydown=function(ev){if(ev.key==="Enter"){ev.preventDefault();g("rbq").click()}};
+ g("rbq").onclick=function(){
+  var t=g("rba").value.trim(),m=g("rbm"),l=g("rbl");if(!t)return;
+  var full=(/^https?:|^-?\d/i.test(t)||t.toLowerCase().indexOf(curCity().split(",")[0].toLowerCase())>-1)?t:t+", "+curCity();
+  m.textContent="Procurando...";l.innerHTML="";
+  jget("/api/geocode?q="+q(full)).then(function(r){
+   if(!Array.isArray(r)||!r.length){m.textContent="Não encontrei esse local. Inclua a rua e a cidade ou cole um link do Google Maps.";return}
+   m.textContent=(r.length===1?"1 local encontrado.":r.length+" locais encontrados.")+" Confira e escolha:";
+   l.innerHTML=r.map(function(x,k){return '<div class="item"><div><div class="n">'+esc(x.nome)+'</div><div class="m"><a target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps/search/?api=1&amp;query='+x.lat+','+x.lon+'">Ver no Maps</a></div></div><button class="ghost" data-base="'+k+'">Usar como base</button></div>'}).join("");
+   Array.prototype.forEach.call(l.querySelectorAll("[data-base]"),function(b){b.onclick=function(){addBase(r[+b.dataset.base])}});
+  }).catch(function(){m.textContent="Falha ao procurar. Tente de novo."});
+ };
+ g("rbg").onclick=function(){
+  var m=g("rbm");
+  if(!navigator.geolocation){m.textContent="Este navegador não permite obter a localização.";return}
+  m.textContent="Obtendo localização...";
+  navigator.geolocation.getCurrentPosition(function(p){addBase({nome:"Minha localização",lat:+p.coords.latitude.toFixed(6),lon:+p.coords.longitude.toFixed(6)})},function(){m.textContent="Não consegui obter sua localização (permissão negada?)."},{timeout:10000});
+ };
 }
 function comerFields(){
  return '<div class="row"><div><label for="cg">Categoria</label><input id="cg" list="cgl" placeholder="Pizza, Hambúrguer..."><datalist id="cgl">'+CATR.map(function(c){return '<option value="'+c+'">'}).join("")+'</datalist></div><div><label for="fp">Faixa de preço</label><select id="fp"><option value="">Não informada</option><option value="$">$ · econômico</option><option value="$$">$$ · moderado</option><option value="$$$">$$$ · caro</option><option value="$$$$">$$$$ · sofisticado</option></select></div><div><label for="av">Nota (0 a 5)</label><input id="av" type="number" min="0" max="5" step="0.1" inputmode="decimal"></div></div><label for="hr">Horário de funcionamento</label><input id="hr" placeholder="Ex.: Seg-Sex 11h-23h"><div class="row"><div><label for="st">Site</label><input id="st" placeholder="https://..."></div><div><label for="ig">Instagram</label><input id="ig" placeholder="https://instagram.com/..."></div><div><label for="ex">Outra página (Tripadvisor, blog)</label><input id="ex" placeholder="https://..."></div></div><div style="margin-top:10px"><button class="ghost" id="rf" type="button">Buscar dados nos links</button></div><p id="rs" class="m" style="color:var(--mute);font-size:14px;margin:8px 0 0"></p><img id="rfi" alt="" hidden style="width:140px;height:auto;max-height:100px;object-fit:cover;border-radius:8px;margin-top:8px">';
@@ -308,17 +340,18 @@ function render(){
  if(ct)ct.onchange=function(){cur=+ct.value;render()};
  var rb=document.getElementById("rb"),rr=document.getElementById("rr"),rn=document.getElementById("rn"),rf=document.getElementById("rf");
  if(rf)rf.onclick=function(){enriquecer(undefined,"")};
+ initBase();
  if(rr)rr.oninput=function(){document.getElementById("rrv").textContent=rr.value+" km"};
  if(rn)rn.onkeydown=function(ev){if(ev.key==="Enter"){ev.preventDefault();rb.click()}};
  if(rb)rb.onclick=function(){
   var m=document.getElementById("rm"),l=document.getElementById("rl"),nome=document.getElementById("rn").value.trim();
   m.textContent="Buscando...";l.innerHTML="";
-  jget("/api/restaurants?city="+q(curCity())+"&r="+(+document.getElementById("rr").value*1000)+"&cat="+q(document.getElementById("rc").value)+"&nome="+q(nome)).then(function(r){
+  jget("/api/restaurants?city="+q(curCity())+"&r="+(+document.getElementById("rr").value*1000)+"&cat="+q(document.getElementById("rc").value)+"&nome="+q(nome)+(baseAtual()?"&lat="+baseAtual().lat+"&lon="+baseAtual().lon:"")).then(function(r){
    if(!Array.isArray(r)){m.textContent=r.erro||"Não foi possível buscar agora.";return}
    if(r.length)m.textContent=r.length+" resultados. Toque em Usar para preencher o formulário.";
    else if(nome)m.innerHTML="Nenhum local com esse nome no raio escolhido. Tente parte do nome, aumente o raio ou <a target=\"_blank\" rel=\"noopener noreferrer\" style=\"color:var(--acc)\" href=\"https://www.google.com/maps/search/"+q(nome+" "+curCity())+"\">procure no Google Maps</a> e preencha à mão.";
    else m.textContent="Nada encontrado. Tente outra categoria ou um raio maior.";
-   l.innerHTML=r.map(function(x,k){return '<div class="item"><div><div class="n">'+esc(x.nome)+'</div><div class="m">'+esc([x.tipo,x.coz,x.dist+" m",x.end].filter(Boolean).join(" · "))+'</div><div class="m">'+restLinks(x)+'</div></div><button class="ghost" data-use="'+k+'">Usar</button></div>'}).join("");
+   l.innerHTML=r.map(function(x,k){return '<div class="item"><div><div class="n">'+esc(x.nome)+'</div><div class="m">'+esc([x.tipo,x.coz,fmtDist(x.dist),x.end].filter(Boolean).join(" · "))+'</div><div class="m">'+restLinks(x)+'</div></div><button class="ghost" data-use="'+k+'">Usar</button></div>'}).join("");
    Array.prototype.forEach.call(l.querySelectorAll("[data-use]"),function(b){b.onclick=function(){usarRest(r[+b.dataset.use])}});
   }).catch(function(){m.textContent="Falha ao buscar. Tente de novo."});
  };

@@ -281,15 +281,44 @@ async function restInfo(urls, nome, chk) {
   if (out.fonte) cache.set(k, out);
   return out;
 }
+// ---------- Local de base: endereço, link do Google Maps ou coordenadas -> lat/lon ----------
+const safeDec = s => { try { return decodeURIComponent(s); } catch { return s; } };
+const coordsDeUrl = u => {
+  const m = u.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || u.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || u.match(/[?&](?:q|ll|query|center|destination)=(-?\d+\.\d+),\s?(-?\d+\.\d+)/);
+  return m ? { lat: +m[1], lon: +m[2] } : null;
+};
+const HOST_MAPS = /(^|\.)(google\.[a-z.]+|goo\.gl|g\.co)$/i;
+const centroDe = (la, lo) => { const lat = parseFloat(la), lon = parseFloat(lo); return Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon } : null; };
+async function geocode(qs) {
+  qs = String(qs || "").trim(); if (qs.length < 3) return [];
+  const par = qs.match(/^(-?\d{1,2}(?:\.\d+)?)\s*[,;]\s*(-?\d{1,3}(?:\.\d+)?)$/);
+  if (par) { const c = centroDe(par[1], par[2]); return c ? [{ nome: `Coordenadas ${par[1]}, ${par[2]}`, ...c }] : []; }
+  if (/^https?:\/\//i.test(qs)) {
+    const href = await safeUrl(qs); if (!HOST_MAPS.test(new URL(href).hostname)) return [];
+    let fin = href, c = coordsDeUrl(safeDec(href));
+    if (!c) { const r = await getMs(href, 6000); fin = r.url || href; c = coordsDeUrl(safeDec(fin)); }
+    if (!c) return [];
+    const pm = safeDec(fin).match(/\/maps\/place\/([^/@?]+)/);
+    return [{ nome: pm ? pm[1].replace(/\+/g, " ") : "Local do mapa", ...c }];
+  }
+  const k = "g:" + qs.toLowerCase(); if (cache.has(k)) return cache.get(k);
+  const r = await get("https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&q=" + encodeURIComponent(qs));
+  const out = (await r.json()).map(x => {
+    const a = x.address || {}, rua = a.road && (a.road + (a.house_number ? ", " + a.house_number : ""));
+    const nome = [x.name && x.name !== a.road ? x.name : "", rua, a.suburb || a.neighbourhood, a.city || a.town || a.village || a.municipality].filter(Boolean).join(" · ") || String(x.display_name || "").split(",").slice(0, 3).join(",");
+    return { nome, lat: +x.lat, lon: +x.lon };
+  });
+  cache.set(k, out); return out;
+}
 const CATKEYS = { "Pizza":"pizza","Hambúrguer":"burger","Carnes e churrasco":"steak_house|barbecue","Italiana":"italian|pasta","Massas":"pasta","Japonesa":"japanese|sushi","Fondue":"fondue","Alemã":"german","Frutos do mar":"seafood|fish","Vegetariana":"vegetarian|vegan","Brasileira":"brazilian|regional" };
 const ACC = { a: "[aàáâãä]", e: "[eéèêë]", i: "[iíìîï]", o: "[oóòôõö]", u: "[uúùûü]", c: "[cç]", n: "[nñ]" };
 // Nome digitado -> padrão que ignora maiúsculas e acentos (só letras, números, espaço, ' e -)
 const nomeRe = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9 '-]/g, "").trim().slice(0, 60).replace(/[aeioucn]/g, ch => ACC[ch]);
-async function restaurantes(cidade, raio, cat, nome) {
+async function restaurantes(cidade, raio, cat, nome, centro) {
   raio = Math.min(Math.max(+raio || 4000, 1000), 16000);
   const nre = nomeRe(nome);
-  const k = `r:${cidade}:${raio}:${cat || ""}:${nre}`; if (cache.has(k)) return cache.get(k);
-  const c = (await places(cidade))[0]; if (!c) return [];
+  const k = `r:${cidade}:${raio}:${cat || ""}:${nre}:${centro ? centro.lat.toFixed(4) + "," + centro.lon.toFixed(4) : ""}`; if (cache.has(k)) return cache.get(k);
+  const c = centro || (await places(cidade))[0]; if (!c) return [];
   let filtro = '["amenity"~"^(restaurant|cafe|bar|pub)$"]';
   if (cat === "Café") filtro = '["amenity"="cafe"]';
   else if (cat === "Bar") filtro = '["amenity"~"^(bar|pub)$"]';
@@ -358,10 +387,11 @@ const server = http.createServer(async (req, res) => {
     });
   }
 }
+    if (p === "/api/geocode") return send(res, 200, await geocode(u.searchParams.get("q") || "").catch(() => []));
     if (p === "/api/descobrir") { const n = (u.searchParams.get("nome") || "").trim(); if (n.length < 2) return send(res, 400, { erro: "Nome não informado" }); return send(res, 200, await descobrir(n, u.searchParams.get("cidade") || "").catch(() => ({ site: "", insta: "", extra: "", ta: "", outros: [] }))); }
     if (p === "/api/restinfo") { const l = ["site", "extra", "insta"].map(k => u.searchParams.get(k) || "").filter(x => /^https?:\/\//i.test(x)); const d = l.length ? { ...(await restInfo(l, u.searchParams.get("nome") || "", u.searchParams.get("chk") === "1")) } : { faixa: "", horario: "", avaliacao: "", categoria: "", precoTxt: "", fotos: [], fonte: "" }; d.foto = ""; for (const f of d.fotos) { try { d.foto = await baixarFoto(f); break; } catch {} } delete d.fotos; return send(res, 200, d); }
     if (p === "/api/foto") { const f = new URL(u.searchParams.get("url") || ""); if (f.hostname !== "storage.googleapis.com" || !f.pathname.startsWith("/movida-public-images/")) return send(res, 400, { erro: "origem não permitida" }); return send(res, 200, { foto: await baixarFoto(f.href) }); }
-    if (p === "/api/restaurants") { const c = (u.searchParams.get("city") || "").trim(); if (c.length < 3) return send(res, 400, { erro: "Cidade não informada" }); try { return send(res, 200, await restaurantes(c, u.searchParams.get("r"), u.searchParams.get("cat"), u.searchParams.get("nome"))); } catch (e) { return send(res, 502, { erro: e.message || "Não foi possível buscar restaurantes agora." }); } }
+    if (p === "/api/restaurants") { const c = (u.searchParams.get("city") || "").trim(); if (c.length < 3) return send(res, 400, { erro: "Cidade não informada" }); try { return send(res, 200, await restaurantes(c, u.searchParams.get("r"), u.searchParams.get("cat"), u.searchParams.get("nome"), centroDe(u.searchParams.get("lat"), u.searchParams.get("lon")))); } catch (e) { return send(res, 502, { erro: e.message || "Não foi possível buscar restaurantes agora." }); } }
     if (p === "/api/places") { const q = (u.searchParams.get("q") || "").trim(); return send(res, 200, q.length < 3 ? [] : await places(q)); }
     if (p === "/api/weather") { const c = (u.searchParams.get("cities") || "").split("|").filter(Boolean), out = {}; for (const x of c) out[x] = await clima(x, u.searchParams.get("ini"), u.searchParams.get("fim")).catch(() => []); return send(res, 200, out); }
     if (p === "/api/calendar.ics") { const all = loadAll(), id = u.searchParams.get("id"); if (!okId(id) || !all[id]) return send(res, 404, { erro: "viagem não encontrada" }); return send(res, 200, ics(all[id]), "text/calendar; charset=utf-8", { "Content-Disposition": 'attachment; filename="viagem.ics"' }); }
@@ -370,4 +400,4 @@ const server = http.createServer(async (req, res) => {
   } catch (e) { send(res, 500, { erro: e.message }); }
 });
 if (require.main === module) server.listen(PORT, () => console.log("Planejador rodando em http://localhost:" + PORT));
-module.exports = { parseHtml, faixaDe, horasLd, ptHoras, parseDDG, parseBing, classifica, extractPage, descobrir, restInfo };
+module.exports = { parseHtml, faixaDe, horasLd, ptHoras, parseDDG, parseBing, classifica, extractPage, descobrir, restInfo, geocode, coordsDeUrl, centroDe };
