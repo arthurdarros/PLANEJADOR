@@ -12,6 +12,12 @@ const cache = new Map(); // cache simples em memória (por instância)
 const get = async (u, opt = {}) => fetch(u, { ...opt, headers: { "User-Agent": UA, "Accept-Language": "pt-BR,pt;q=0.9", ...(opt.headers || {}) }, signal: AbortSignal.timeout(8000), redirect: "follow" });
 
 // ---------- Armazenamento (Netlify Blobs) ----------
+// Tenta leitura forte (sempre atualizada); se o ambiente não suportar, cai no modo padrão.
+function mkStore(name) {
+  const strong = getStore({ name, consistency: "strong" }), plain = getStore(name);
+  const run = async (m, a) => { try { return await strong[m](...a); } catch (e) { console.error("Blobs (strong) falhou, usando modo padrão:", e.message); return plain[m](...a); } };
+  return { get: (...a) => run("get", a), set: (...a) => run("set", a), setJSON: (...a) => run("setJSON", a), delete: (...a) => run("delete", a), list: (...a) => run("list", a) };
+}
 const okId = id => /^\d{1,20}$/.test(id || "");
 const counted = t => (t.items || []).filter(x => !["hosp", "carro", "comer"].includes(x.cat) || x.escolhida);
 const resumo = ([id, t]) => ({ id, dest: t.dest || "", ini: t.ini || "", fim: t.fim || "", cities: t.cities || (t.dest ? [t.dest] : []), count: (t.items || []).length, total: counted(t).reduce((s, x) => s + (Number(x.preco) || 0), 0) });
@@ -209,7 +215,7 @@ const bin = (buf, type, extra = {}) => ({ statusCode: 200, headers: { "Content-T
 export async function handler(event) {
   try {
     connectLambda(event);
-    const S = { trips: getStore({ name: "trips", consistency: "strong" }), fotos: getStore({ name: "fotos", consistency: "strong" }) };
+    const S = { trips: mkStore("trips"), fotos: mkStore("fotos") };
     const method = event.httpMethod || "GET", q = event.queryStringParameters || {}, hdr = event.headers || {};
     // Normaliza o caminho (o redirecionamento do Netlify pode entregar /.netlify/functions/api/...)
     let p = (event.path || "").replace(/^\/\.netlify\/functions\/api/, "");
@@ -217,6 +223,14 @@ export async function handler(event) {
     const body = () => event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf8") : (event.body || "");
 
     if (TOKEN && p.startsWith("/api/") && hdr["x-token"] !== TOKEN && q.token !== TOKEN) return json(401, { erro: "não autorizado" });
+
+    // Diagnóstico do armazenamento: abra /api/diag no navegador
+    if (p === "/api/diag") {
+      const out = { blobsNoEvento: !!event.blobs, leitura: "", escrita: "" };
+      try { const l = await S.trips.list(); out.leitura = "ok (" + l.blobs.length + " viagens)"; } catch (e) { out.leitura = "ERRO: " + e.message; }
+      try { await S.fotos.set("diag.txt", "ok"); await S.fotos.delete("diag.txt"); out.escrita = "ok"; } catch (e) { out.escrita = "ERRO: " + e.message; }
+      return json(200, out);
+    }
 
     if (p.startsWith("/uploads/")) {
       const nome = p.split("/").pop(), ext = nome.split(".").pop();
